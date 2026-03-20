@@ -45,6 +45,7 @@ const upload = multer({
 
 // ==================== Auth Routes ====================
 router.post('/auth/login', AuthController.login);
+router.post('/auth/import', AuthController.importCredentials);
 router.get('/auth/session', AuthController.getSession);
 router.get('/auth/sessions', AuthController.listSessions);
 router.post('/auth/validate', AuthController.validate);

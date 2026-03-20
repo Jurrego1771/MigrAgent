@@ -28,6 +28,30 @@ export class AuthController {
   }
 
   /**
+   * POST /api/auth/import
+   * Importa JWT + connect.sid copiados manualmente desde el browser.
+   */
+  static async importCredentials(req: Request, res: Response): Promise<void> {
+    const { jwt, sid, apiUrl } = req.body;
+
+    if (!jwt || !sid || !apiUrl) {
+      res.status(400).json({ error: 'jwt, sid y apiUrl son requeridos.' });
+      return;
+    }
+
+    try {
+      const session = await AuthService.importCredentials({
+        jwt: jwt.trim(),
+        sid: sid.trim(),
+        apiUrl: apiUrl.trim(),
+      });
+      res.json({ success: true, session });
+    } catch (err: any) {
+      res.status(400).json({ success: false, error: err.message });
+    }
+  }
+
+  /**
    * GET /api/auth/session
    * Devuelve la sesión activa actual (sin credenciales).
    */

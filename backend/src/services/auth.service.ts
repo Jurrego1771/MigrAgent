@@ -254,6 +254,72 @@ export class AuthService {
   }
 
   /**
+   * Importa credenciales copiadas manualmente desde el browser (JWT + connect.sid).
+   * No requiere login programático — el usuario las obtiene de DevTools.
+   */
+  static async importCredentials(params: {
+    jwt: string;
+    sid: string;
+    apiUrl: string;
+  }): Promise<SessionInfo> {
+    const { jwt, sid, apiUrl } = params;
+
+    // Decodificar payload del JWT para extraer datos básicos
+    const payload = AuthService._decodeJwtPayload(jwt) as Record<string, unknown>;
+    const accountId = String(payload?.account || '');
+    const userEmail = String(payload?.email || '');
+    const exp = payload?.exp;
+    const expiresAt =
+      typeof exp === 'number'
+        ? new Date(exp * 1000)
+        : new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    if (!accountId) {
+      throw new Error('El JWT no contiene un account ID válido. Verifica que sea el token correcto de Mediastream.');
+    }
+
+    // Intentar obtener nombre de cuenta desde SM2 (no bloqueante)
+    let accountName: string | undefined;
+    try {
+      const accountResponse = await axios.get(`${apiUrl}/api/account`, {
+        headers: {
+          'x-api-token': jwt,
+          Cookie: `connect.sid=${sid}; jwt=${jwt}`,
+        },
+        timeout: 8000,
+        validateStatus: () => true,
+      });
+      accountName =
+        accountResponse.data?.account?.name ||
+        accountResponse.data?.data?.account?.name ||
+        undefined;
+    } catch {
+      // No bloqueante — continuar sin nombre
+    }
+
+    // Desactivar sesiones previas para la misma cuenta
+    await prisma.authSession.updateMany({
+      where: { accountId, apiUrl, isActive: true },
+      data: { isActive: false },
+    });
+
+    const session = await prisma.authSession.create({
+      data: {
+        accountId,
+        accountName: accountName || null,
+        userEmail,
+        encryptedJwt: encrypt(jwt),
+        encryptedSid: encrypt(sid),
+        apiUrl,
+        expiresAt,
+        isActive: true,
+      },
+    });
+
+    return AuthService._toPublic(session);
+  }
+
+  /**
    * Devuelve todas las sesiones (activas e inactivas) para mostrar historial.
    */
   static async listSessions(): Promise<SessionInfo[]> {

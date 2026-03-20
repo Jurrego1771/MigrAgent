@@ -360,6 +360,15 @@ export const authApi = {
     return data;
   },
 
+  importCredentials: async (params: {
+    jwt: string;
+    sid: string;
+    apiUrl: string;
+  }): Promise<{ success: boolean; session: SessionInfo }> => {
+    const { data } = await api.post('/auth/import', params);
+    return data;
+  },
+
   getSession: async (): Promise<{ authenticated: boolean; session: SessionInfo | null }> => {
     const { data } = await api.get('/auth/session');
     return data;

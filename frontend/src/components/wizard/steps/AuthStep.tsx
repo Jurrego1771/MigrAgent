@@ -4,80 +4,72 @@ import {
   Typography,
   TextField,
   Button,
-  IconButton,
-  InputAdornment,
   Alert,
   Chip,
   CircularProgress,
   Divider,
-  Collapse,
   alpha,
+  Collapse,
 } from '@mui/material';
 import {
-  Visibility,
-  VisibilityOff,
   CheckCircle as CheckCircleIcon,
-  LockOpen as LockOpenIcon,
   Logout as LogoutIcon,
   Refresh as RefreshIcon,
   Link as LinkIcon,
-  Person as PersonIcon,
+  OpenInNew as OpenInNewIcon,
+  ContentPaste as PasteIcon,
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon,
 } from '@mui/icons-material';
 import { authApi } from '../../../services/api';
 import { useWizard } from '../../../context/WizardContext';
 import { SessionInfo } from '../../../types';
 import { COLORS } from '../../../theme';
 
-interface FormState {
+// ---------------------------------------------------------------------------
+// Formulario de import de credenciales
+// ---------------------------------------------------------------------------
+
+interface ImportForm {
   apiUrl: string;
-  email: string;
-  password: string;
-  totp: string;
+  jwt: string;
+  sid: string;
 }
 
 export default function AuthStep() {
   const { session, setSession } = useWizard();
 
-  const [form, setForm] = useState<FormState>({
-    apiUrl: 'https://platform.mediastre.am',
-    email: '',
-    password: '',
-    totp: '',
+  const [form, setForm] = useState<ImportForm>({
+    apiUrl: 'https://dev.platform.mediastre.am',
+    jwt: '',
+    sid: '',
   });
 
-  const [showPassword, setShowPassword] = useState(false);
-  const [totpRequired, setTotpRequired] = useState(false);
   const [loading, setLoading] = useState(false);
   const [validating, setValidating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sessionChecked, setSessionChecked] = useState(false);
+  const [instructionsOpen, setInstructionsOpen] = useState(false);
 
   // Al montar, verificar si ya hay sesión activa
   useEffect(() => {
-    const checkExisting = async () => {
-      try {
-        const result = await authApi.getSession();
-        if (result.authenticated && result.session) {
-          setSession(result.session);
-        }
-      } catch {
-        // Sin sesión activa — OK
-      } finally {
-        setSessionChecked(true);
-      }
-    };
-    checkExisting();
+    authApi.getSession()
+      .then((result) => {
+        if (result.authenticated && result.session) setSession(result.session);
+      })
+      .catch(() => {})
+      .finally(() => setSessionChecked(true));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleChange = (field: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChange = (field: keyof ImportForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setForm((prev) => ({ ...prev, [field]: e.target.value }));
     setError(null);
   };
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleImport = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.email.trim() || !form.password.trim()) {
-      setError('Email y contraseña son requeridos.');
+    if (!form.jwt.trim() || !form.sid.trim()) {
+      setError('JWT y connect.sid son requeridos.');
       return;
     }
 
@@ -85,25 +77,14 @@ export default function AuthStep() {
     setError(null);
 
     try {
-      const result = await authApi.login({
-        email: form.email.trim(),
-        password: form.password,
-        apiUrl: form.apiUrl.trim() || undefined,
-        totp: form.totp.trim() || undefined,
+      const result = await authApi.importCredentials({
+        jwt: form.jwt.trim(),
+        sid: form.sid.trim(),
+        apiUrl: form.apiUrl.trim(),
       });
-
       setSession(result.session);
-      setTotpRequired(false);
     } catch (err: any) {
-      const code = err?.response?.data?.code;
-      const message = err?.response?.data?.error || err.message;
-
-      if (code === 'TOTP_REQUIRED') {
-        setTotpRequired(true);
-        setError(null);
-      } else {
-        setError(message || 'Error al conectar con Mediastream.');
-      }
+      setError(err?.response?.data?.error || err.message || 'Error al importar credenciales.');
     } finally {
       setLoading(false);
     }
@@ -115,7 +96,7 @@ export default function AuthStep() {
       const result = await authApi.validate();
       if (!result.valid) {
         setSession(null);
-        setError(result.reason || 'La sesión ya no es válida. Inicia sesión nuevamente.');
+        setError(result.reason || 'La sesión ya no es válida. Importa nuevamente.');
       }
     } catch {
       setError('No se pudo verificar la sesión.');
@@ -125,14 +106,10 @@ export default function AuthStep() {
   };
 
   const handleLogout = async () => {
-    try {
-      await authApi.logout();
-    } catch {
-      // Ignorar error de logout
-    }
+    try { await authApi.logout(); } catch { /* ignorar */ }
     setSession(null);
     setError(null);
-    setTotpRequired(false);
+    setForm((p) => ({ ...p, jwt: '', sid: '' }));
   };
 
   if (!sessionChecked) {
@@ -143,23 +120,108 @@ export default function AuthStep() {
     );
   }
 
-  // Vista: sesión activa
   if (session) {
-    return <ActiveSessionView session={session} onLogout={handleLogout} onValidate={handleValidate} validating={validating} />;
+    return (
+      <ActiveSessionView
+        session={session}
+        onLogout={handleLogout}
+        onValidate={handleValidate}
+        validating={validating}
+      />
+    );
   }
 
-  // Vista: formulario de login
   return (
-    <Box component="form" onSubmit={handleLogin} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+    <Box component="form" onSubmit={handleImport} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
 
       {/* Header */}
-      <Box sx={{ mb: 1 }}>
+      <Box>
         <Typography variant="h5" fontWeight={700} gutterBottom>
           Conectar con Mediastream
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          Ingresa tus credenciales para autenticarte en la plataforma. Las credenciales se almacenan cifradas localmente.
+          Pega el JWT y el connect.sid desde las DevTools de tu browser mientras tienes sesión abierta en Mediastream.
         </Typography>
+      </Box>
+
+      {/* Instrucciones desplegables */}
+      <Box
+        sx={{
+          borderRadius: 2,
+          border: `1px solid ${alpha(COLORS.darkBorder, 0.8)}`,
+          overflow: 'hidden',
+        }}
+      >
+        <Box
+          onClick={() => setInstructionsOpen((p) => !p)}
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            px: 2,
+            py: 1.5,
+            cursor: 'pointer',
+            background: alpha(COLORS.charcoal, 0.2),
+            '&:hover': { background: alpha(COLORS.charcoal, 0.35) },
+          }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <PasteIcon sx={{ fontSize: '1rem', color: COLORS.neonGreen }} />
+            <Typography variant="body2" fontWeight={600}>
+              ¿Cómo obtener el JWT y el connect.sid?
+            </Typography>
+          </Box>
+          {instructionsOpen
+            ? <ExpandLessIcon sx={{ fontSize: '1rem', color: 'text.disabled' }} />
+            : <ExpandMoreIcon sx={{ fontSize: '1rem', color: 'text.disabled' }} />
+          }
+        </Box>
+
+        <Collapse in={instructionsOpen}>
+          <Box sx={{ px: 2, py: 2, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+
+            {/* Paso 1 */}
+            <StepInstruction number={1}>
+              Abre Mediastream en tu browser e inicia sesión normalmente.
+              <Button
+                size="small"
+                endIcon={<OpenInNewIcon sx={{ fontSize: '0.8rem' }} />}
+                href={form.apiUrl}
+                target="_blank"
+                sx={{ ml: 1, fontSize: '0.75rem', py: 0.25, color: COLORS.neonGreen }}
+              >
+                Abrir plataforma
+              </Button>
+            </StepInstruction>
+
+            {/* Paso 2 */}
+            <StepInstruction number={2}>
+              Abre DevTools con <Code>F12</Code> y ve a la pestaña <Code>Application</Code> (Chrome) o <Code>Storage</Code> (Firefox).
+            </StepInstruction>
+
+            {/* Paso 3 */}
+            <StepInstruction number={3}>
+              En el panel izquierdo, expande <Code>Cookies</Code> → selecciona el dominio de la plataforma.
+            </StepInstruction>
+
+            {/* Paso 4 */}
+            <StepInstruction number={4}>
+              Copia el valor de la cookie <Code>jwt</Code> y pégalo en el campo <strong>JWT Token</strong> abajo.
+            </StepInstruction>
+
+            {/* Paso 5 */}
+            <StepInstruction number={5}>
+              Copia el valor de la cookie <Code>connect.sid</Code> y pégalo en el campo <strong>Connect.sid</strong> abajo. Incluye el prefijo <Code>s%3A</Code> si aparece.
+            </StepInstruction>
+
+            <Alert severity="info" sx={{ fontSize: '0.78rem', mt: 0.5 }}>
+              Alternativamente, en la consola del browser ejecuta:<br />
+              <code style={{ fontSize: '0.75rem' }}>
+                document.cookie.split(';').map(c =&gt; c.trim())
+              </code>
+            </Alert>
+          </Box>
+        </Collapse>
       </Box>
 
       {/* URL de la plataforma */}
@@ -171,73 +233,40 @@ export default function AuthStep() {
         size="small"
         InputProps={{
           startAdornment: (
-            <InputAdornment position="start">
+            <Box sx={{ mr: 1, display: 'flex' }}>
               <LinkIcon sx={{ fontSize: 18, color: 'text.disabled' }} />
-            </InputAdornment>
+            </Box>
           ),
         }}
-        helperText="URL base de tu instancia de Mediastream"
+        helperText="URL base de tu instancia de Mediastream (sin trailing slash)"
       />
 
       <Divider />
 
-      {/* Email */}
+      {/* JWT */}
       <TextField
-        label="Email"
-        type="email"
-        value={form.email}
-        onChange={handleChange('email')}
+        label="JWT Token"
+        value={form.jwt}
+        onChange={handleChange('jwt')}
         fullWidth
-        autoComplete="email"
-        InputProps={{
-          startAdornment: (
-            <InputAdornment position="start">
-              <PersonIcon sx={{ fontSize: 18, color: 'text.disabled' }} />
-            </InputAdornment>
-          ),
-        }}
+        multiline
+        minRows={3}
+        maxRows={5}
+        placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJp..."
+        inputProps={{ style: { fontFamily: 'monospace', fontSize: '0.78rem' } }}
+        helperText="Valor de la cookie 'jwt' en DevTools → Application → Cookies"
       />
 
-      {/* Password */}
+      {/* connect.sid */}
       <TextField
-        label="Contraseña"
-        type={showPassword ? 'text' : 'password'}
-        value={form.password}
-        onChange={handleChange('password')}
+        label="connect.sid"
+        value={form.sid}
+        onChange={handleChange('sid')}
         fullWidth
-        autoComplete="current-password"
-        InputProps={{
-          startAdornment: (
-            <InputAdornment position="start">
-              <LockOpenIcon sx={{ fontSize: 18, color: 'text.disabled' }} />
-            </InputAdornment>
-          ),
-          endAdornment: (
-            <InputAdornment position="end">
-              <IconButton onClick={() => setShowPassword((v) => !v)} size="small" edge="end" tabIndex={-1}>
-                {showPassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
-              </IconButton>
-            </InputAdornment>
-          ),
-        }}
+        placeholder="s%3AxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxXxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        inputProps={{ style: { fontFamily: 'monospace', fontSize: '0.78rem' } }}
+        helperText="Valor de la cookie 'connect.sid' en DevTools → Application → Cookies"
       />
-
-      {/* TOTP — solo si se requiere */}
-      <Collapse in={totpRequired}>
-        <Box>
-          <Alert severity="info" sx={{ mb: 1.5, fontSize: '0.8rem' }}>
-            Esta cuenta tiene autenticación en dos pasos activada. Ingresa tu código TOTP.
-          </Alert>
-          <TextField
-            label="Código TOTP (6 dígitos)"
-            value={form.totp}
-            onChange={handleChange('totp')}
-            fullWidth
-            inputProps={{ maxLength: 6, inputMode: 'numeric', pattern: '[0-9]*' }}
-            autoFocus={totpRequired}
-          />
-        </Box>
-      </Collapse>
 
       {/* Error */}
       {error && (
@@ -249,9 +278,6 @@ export default function AuthStep() {
       {/* Aviso de seguridad */}
       <Box
         sx={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          gap: 1,
           p: 1.5,
           borderRadius: 2,
           background: alpha(COLORS.charcoal, 0.25),
@@ -259,7 +285,7 @@ export default function AuthStep() {
         }}
       >
         <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.5 }}>
-          🔒 Las credenciales se cifran con <strong>AES-256-GCM</strong> antes de persistirse. La contraseña nunca se almacena — solo el JWT y la cookie de sesión resultantes.
+          🔒 El JWT y el connect.sid se cifran con <strong>AES-256-GCM</strong> antes de guardarse localmente. Nunca se envían a terceros.
         </Typography>
       </Box>
 
@@ -268,18 +294,69 @@ export default function AuthStep() {
         type="submit"
         variant="contained"
         size="large"
-        disabled={loading || !form.email || !form.password}
+        disabled={loading || !form.jwt.trim() || !form.sid.trim()}
         sx={{ alignSelf: 'flex-start', px: 4, fontWeight: 700 }}
       >
         {loading ? (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <CircularProgress size={16} sx={{ color: 'inherit' }} />
-            Conectando…
+            Importando…
           </Box>
         ) : (
-          'Iniciar sesión'
+          'Importar credenciales'
         )}
       </Button>
+    </Box>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Helpers de UI
+// ---------------------------------------------------------------------------
+
+function StepInstruction({ number, children }: { number: number; children: React.ReactNode }) {
+  return (
+    <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5 }}>
+      <Box
+        sx={{
+          width: 22,
+          height: 22,
+          borderRadius: '50%',
+          background: alpha(COLORS.neonGreen, 0.15),
+          border: `1px solid ${alpha(COLORS.neonGreen, 0.4)}`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+          mt: 0.1,
+        }}
+      >
+        <Typography variant="caption" sx={{ color: COLORS.neonGreen, fontWeight: 700, fontSize: '0.7rem' }}>
+          {number}
+        </Typography>
+      </Box>
+      <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.6 }}>
+        {children}
+      </Typography>
+    </Box>
+  );
+}
+
+function Code({ children }: { children: React.ReactNode }) {
+  return (
+    <Box
+      component="code"
+      sx={{
+        px: 0.75,
+        py: 0.2,
+        borderRadius: 1,
+        background: alpha(COLORS.charcoal, 0.5),
+        color: COLORS.neonGreen,
+        fontSize: '0.78rem',
+        fontFamily: 'monospace',
+      }}
+    >
+      {children}
     </Box>
   );
 }
@@ -301,7 +378,7 @@ function ActiveSessionView({ session, onLogout, onValidate, validating }: Active
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-      <Box sx={{ mb: 1 }}>
+      <Box>
         <Typography variant="h5" fontWeight={700} gutterBottom>
           Sesión activa
         </Typography>
@@ -322,7 +399,6 @@ function ActiveSessionView({ session, onLogout, onValidate, validating }: Active
           gap: 2,
         }}
       >
-        {/* Status badge */}
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <CheckCircleIcon sx={{ color: COLORS.neonGreen, fontSize: 20 }} />
@@ -334,9 +410,7 @@ function ActiveSessionView({ session, onLogout, onValidate, validating }: Active
             label={hoursLeft > 0 ? `Expira en ${hoursLeft}h` : 'Próximo a expirar'}
             size="small"
             sx={{
-              bgcolor: hoursLeft > 2
-                ? alpha(COLORS.sageGreen, 0.2)
-                : alpha(COLORS.alertRed, 0.2),
+              bgcolor: hoursLeft > 2 ? alpha(COLORS.sageGreen, 0.2) : alpha(COLORS.alertRed, 0.2),
               color: hoursLeft > 2 ? COLORS.sageGreen : COLORS.alertRed,
               border: `1px solid ${hoursLeft > 2 ? alpha(COLORS.sageGreen, 0.4) : alpha(COLORS.alertRed, 0.4)}`,
               fontWeight: 600,
@@ -347,7 +421,6 @@ function ActiveSessionView({ session, onLogout, onValidate, validating }: Active
 
         <Divider sx={{ opacity: 0.3 }} />
 
-        {/* Account info */}
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
           <InfoRow label="Cuenta" value={session.accountName || session.accountId} highlight />
           <InfoRow label="Usuario" value={session.userEmail} />
@@ -356,7 +429,6 @@ function ActiveSessionView({ session, onLogout, onValidate, validating }: Active
         </Box>
       </Box>
 
-      {/* Actions */}
       <Box sx={{ display: 'flex', gap: 1.5 }}>
         <Button
           variant="outlined"
@@ -368,7 +440,6 @@ function ActiveSessionView({ session, onLogout, onValidate, validating }: Active
         >
           {validating ? 'Verificando…' : 'Verificar sesión'}
         </Button>
-
         <Button
           variant="outlined"
           size="small"
@@ -383,16 +454,8 @@ function ActiveSessionView({ session, onLogout, onValidate, validating }: Active
   );
 }
 
-function InfoRow({
-  label,
-  value,
-  highlight,
-  mono,
-}: {
-  label: string;
-  value: string;
-  highlight?: boolean;
-  mono?: boolean;
+function InfoRow({ label, value, highlight, mono }: {
+  label: string; value: string; highlight?: boolean; mono?: boolean;
 }) {
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
