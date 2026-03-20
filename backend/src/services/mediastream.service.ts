@@ -334,6 +334,26 @@ export class MediastreamService {
     };
   }
 
+  // ==================== Account ====================
+
+  async getAccountInfo(): Promise<Record<string, unknown>> {
+    const response = await this.client.get('/api/account');
+    // SM2 devuelve { status: 'OK', data: { account: {...}, name: string, ... } }
+    return response.data?.data || response.data;
+  }
+
+  async getRenditionRules(): Promise<unknown[]> {
+    const response = await this.client.get('/api/account/rendition_rules');
+    return response.data?.data || response.data || [];
+  }
+
+  async getCategories(search?: string): Promise<unknown[]> {
+    const params: Record<string, string> = {};
+    if (search) params.category_name = search;
+    const response = await this.client.get('/api/category', { params });
+    return response.data?.data || response.data || [];
+  }
+
   // ==================== Factory desde sesión activa ====================
 
   /**

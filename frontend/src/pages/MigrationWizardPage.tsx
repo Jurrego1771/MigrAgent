@@ -8,6 +8,7 @@ import { useNavigate } from 'react-router-dom';
 import { WizardProvider, useWizard, WIZARD_STEPS } from '../context/WizardContext';
 import WizardStepper from '../components/wizard/WizardStepper';
 import AuthStep from '../components/wizard/steps/AuthStep';
+import AccountValidationStep from '../components/wizard/steps/AccountValidationStep';
 import { COLORS } from '../theme';
 
 // ---------------------------------------------------------------------------
@@ -19,7 +20,7 @@ function StepContent() {
 
   switch (currentStep) {
     case 1: return <AuthStep />;
-    case 2: return <PlaceholderStep stepId={2} />;
+    case 2: return <AccountValidationStep />;
     case 3: return <PlaceholderStep stepId={3} />;
     case 4: return <PlaceholderStep stepId={4} />;
     case 5: return <PlaceholderStep stepId={5} />;

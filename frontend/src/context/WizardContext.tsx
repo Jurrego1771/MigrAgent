@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
-import { SessionInfo } from '../types';
+import { SessionInfo, AccountValidationState } from '../types';
 
 // ---------------------------------------------------------------------------
 // Definición de pasos
@@ -33,11 +33,19 @@ export interface WizardState {
   // Step 1 — Auth
   session: SessionInfo | null;
 
-  // Step 2 — Account (pendiente)
-  // Step 3 — CSV (pendiente)
-  // Step 4-5 — Validation (pendiente)
-  // Step 6 — Submit (pendiente)
+  // Step 2 — Account
+  accountValidation: AccountValidationState;
 }
+
+const DEFAULT_ACCOUNT_VALIDATION: AccountValidationState = {
+  accountInfo: null,
+  renditionsInfo: null,
+  contentType: null,
+  hasAdvertising: null,
+  suggestCategoryField: false,
+  migrationName: '',
+  migrationStrategy: 'transcode',
+};
 
 interface WizardContextValue extends WizardState {
   steps: WizardStepDef[];
@@ -46,6 +54,7 @@ interface WizardContextValue extends WizardState {
   goToStep: (step: number) => void;
   markStepComplete: (step: number) => void;
   setSession: (session: SessionInfo | null) => void;
+  setAccountValidation: (update: Partial<AccountValidationState>) => void;
   canGoNext: boolean;
   isStepComplete: (step: number) => boolean;
   isStepAccessible: (step: number) => boolean;
@@ -61,6 +70,13 @@ export function WizardProvider({ children }: { children: ReactNode }) {
   const [currentStep, setCurrentStep] = useState(1);
   const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set());
   const [session, setSession] = useState<SessionInfo | null>(null);
+  const [accountValidation, setAccountValidationState] = useState<AccountValidationState>(
+    DEFAULT_ACCOUNT_VALIDATION
+  );
+
+  const setAccountValidation = useCallback((update: Partial<AccountValidationState>) => {
+    setAccountValidationState((prev) => ({ ...prev, ...update }));
+  }, []);
 
   const markStepComplete = useCallback((step: number) => {
     setCompletedSteps((prev) => new Set([...prev, step]));
@@ -103,6 +119,12 @@ export function WizardProvider({ children }: { children: ReactNode }) {
   const canGoNext: boolean = (() => {
     switch (currentStep) {
       case 1: return session !== null;
+      case 2:
+        return (
+          !!accountValidation.contentType &&
+          accountValidation.hasAdvertising !== null &&
+          accountValidation.migrationName.trim().length > 0
+        );
       default: return true;
     }
   })();
@@ -114,11 +136,13 @@ export function WizardProvider({ children }: { children: ReactNode }) {
         completedSteps,
         steps: WIZARD_STEPS,
         session,
+        accountValidation,
         goNext,
         goBack,
         goToStep,
         markStepComplete,
         setSession,
+        setAccountValidation,
         canGoNext,
         isStepComplete,
         isStepAccessible,

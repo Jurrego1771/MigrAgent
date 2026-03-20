@@ -8,6 +8,7 @@ import { CSVController } from '../controllers/csv.controller.js';
 import { AlertController } from '../controllers/alert.controller.js';
 import { SettingsController } from '../controllers/settings.controller.js';
 import { AuthController } from '../controllers/auth.controller.js';
+import { AccountController } from '../controllers/account.controller.js';
 
 const router = Router();
 
@@ -48,6 +49,11 @@ router.get('/auth/sessions', AuthController.listSessions);
 router.post('/auth/validate', AuthController.validate);
 router.delete('/auth/session', AuthController.logout);
 router.delete('/auth/sessions/:id', AuthController.revokeSession);
+
+// ==================== Account Routes ====================
+router.get('/account/info', AccountController.getInfo);
+router.get('/account/renditions', AccountController.getRenditions);
+router.get('/account/categories', AccountController.getCategories);
 
 // ==================== Migration Routes ====================
 router.get('/migrations', MigrationController.list);

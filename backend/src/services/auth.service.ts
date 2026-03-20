@@ -351,6 +351,29 @@ export class AuthService {
   }
 
   /**
+   * Decodifica el payload del JWT almacenado y retorna los módulos de la cuenta.
+   * Los módulos vienen en accountScope del JWT de SM2.
+   */
+  static async getModulesFromSession(): Promise<Record<string, boolean>> {
+    const session = await prisma.authSession.findFirst({
+      where: { isActive: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!session) return {};
+    try {
+      const jwt = decrypt(session.encryptedJwt);
+      const payload = AuthService._decodeJwtPayload(jwt) as Record<string, unknown>;
+      const scope = payload?.accountScope;
+      if (scope && typeof scope === 'object') {
+        return scope as Record<string, boolean>;
+      }
+    } catch {
+      // ignorar errores de descifrado
+    }
+    return {};
+  }
+
+  /**
    * Devuelve las credenciales descifradas de la sesión activa.
    * Uso interno — nunca exponer al frontend.
    */

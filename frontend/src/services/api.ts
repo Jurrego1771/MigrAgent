@@ -14,6 +14,8 @@ import {
   URLCheckResult,
   SessionInfo,
   AuthValidateResult,
+  AccountInfo,
+  RenditionsInfo,
 } from '../types';
 
 const api = axios.create({
@@ -260,6 +262,27 @@ export const settingsApi = {
 
   getMediastreamMigrations: async (): Promise<unknown[]> => {
     const { data } = await api.get('/settings/mediastream-migrations');
+    return data;
+  },
+};
+
+// ==================== Auth ====================
+
+// ==================== Account ====================
+
+export const accountApi = {
+  getInfo: async (): Promise<AccountInfo> => {
+    const { data } = await api.get('/account/info');
+    return data;
+  },
+
+  getRenditions: async (): Promise<RenditionsInfo> => {
+    const { data } = await api.get('/account/renditions');
+    return data;
+  },
+
+  getCategories: async (search?: string): Promise<{ categories: unknown[] }> => {
+    const { data } = await api.get('/account/categories', { params: search ? { search } : {} });
     return data;
   },
 };

@@ -19,6 +19,59 @@ export interface AuthValidateResult {
   reason?: string;
 }
 
+// ==================== Account ====================
+
+export interface AccountModuleChecks {
+  media: boolean;
+  migration: boolean;
+  vod: boolean;
+  aod: boolean;
+  advertising: boolean;
+  drm: boolean;
+}
+
+export interface AccountInfo {
+  account: {
+    id: string | null;
+    name: string | null;
+    encodingProfiles: string[];
+    advertisingEnabled: boolean;
+    advertisingConfig: Record<string, unknown> | null;
+    normalizeAudio: boolean;
+  };
+  modules: Record<string, boolean>;
+  moduleChecks: AccountModuleChecks;
+}
+
+export interface RenditionRule {
+  id: string;
+  name: string;
+  code: string;
+  profileRange?: { min: string; max: string };
+  profiles: string[];
+}
+
+export interface RenditionsInfo {
+  rules: RenditionRule[];
+  activeProfiles: string[];
+  activeVideoProfiles: string[];
+  missingVideoProfiles: string[];
+  allVideoProfiles: string[];
+}
+
+// Estado del paso 2 del wizard
+export interface AccountValidationState {
+  accountInfo: AccountInfo | null;
+  renditionsInfo: RenditionsInfo | null;
+  // Respuestas del usuario
+  contentType: 'vod' | 'aod' | 'both' | null;
+  hasAdvertising: boolean | null;
+  suggestCategoryField: boolean;
+  // Nombre y estrategia de la migración
+  migrationName: string;
+  migrationStrategy: 'transcode' | 'upload';
+}
+
 export interface MappingConfig {
   mapper: string;
   field: string;
