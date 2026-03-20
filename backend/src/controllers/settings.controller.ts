@@ -3,7 +3,6 @@ import { PrismaClient } from '@prisma/client';
 import { MediastreamService } from '../services/mediastream.service.js';
 
 const prisma = new PrismaClient();
-const mediastreamService = new MediastreamService();
 
 export class SettingsController {
   // GET /api/settings
@@ -36,14 +35,16 @@ export class SettingsController {
 
   // POST /api/settings/test-connection
   static async testConnection(req: Request, res: Response) {
-    const result = await mediastreamService.testConnection();
+    const ms = await MediastreamService.fromActiveSession();
+    const result = await ms.testConnection();
     res.json(result);
   }
 
   // GET /api/settings/mediastream-migrations
   static async getMediastreamMigrations(req: Request, res: Response) {
     try {
-      const migrations = await mediastreamService.listMigrations();
+      const ms = await MediastreamService.fromActiveSession();
+      const migrations = await ms.listMigrations();
       res.json(migrations);
     } catch (error) {
       res.status(500).json({

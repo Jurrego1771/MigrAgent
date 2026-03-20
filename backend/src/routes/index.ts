@@ -9,6 +9,7 @@ import { AlertController } from '../controllers/alert.controller.js';
 import { SettingsController } from '../controllers/settings.controller.js';
 import { AuthController } from '../controllers/auth.controller.js';
 import { AccountController } from '../controllers/account.controller.js';
+import { WizardController } from '../controllers/wizard.controller.js';
 
 const router = Router();
 
@@ -95,8 +96,13 @@ router.get('/csv/mapper-options', CSVController.getMapperOptions);
 // CSV temp (wizard)
 router.post('/csv/temp', upload.single('file'), CSVController.uploadTemp);
 router.post('/csv/temp/:id/normalize', CSVController.normalizeTemp);
+router.post('/csv/temp/:id/extract-urls', CSVController.extractUrlsFromTemp);
+router.post('/csv/temp/:id/validate-urls', CSVController.validateUrlsFromTemp);
 router.delete('/csv/temp/:id', CSVController.cleanupTemp);
 router.get('/csv/temp/:id/download', CSVController.downloadTemp);
+
+// ==================== Wizard Routes ====================
+router.post('/wizard/create', WizardController.createMigration);
 
 // ==================== Alert Routes ====================
 router.get('/alerts', AlertController.list);

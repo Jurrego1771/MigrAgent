@@ -13,7 +13,6 @@ import { config } from '../config/index.js';
 
 export class MigrationService {
   private prisma: PrismaClient;
-  private mediastream: MediastreamService;
   private csvValidator: CSVValidatorService;
   private templateService: TemplateService;
   private monitoringIntervals: Map<string, NodeJS.Timeout> = new Map();
@@ -21,9 +20,12 @@ export class MigrationService {
 
   constructor(prisma: PrismaClient) {
     this.prisma = prisma;
-    this.mediastream = new MediastreamService();
     this.csvValidator = new CSVValidatorService();
     this.templateService = new TemplateService(prisma);
+  }
+
+  private async ms(): Promise<MediastreamService> {
+    return MediastreamService.fromActiveSession();
   }
 
   // ==================== Migration CRUD ====================
@@ -111,7 +113,7 @@ export class MigrationService {
     const migration = await this.getById(id);
     if (migration?.mediastreamConfigId) {
       try {
-        await this.mediastream.deleteMigration(migration.mediastreamConfigId);
+        await (await this.ms()).deleteMigration(migration.mediastreamConfigId);
       } catch {
         // Ignorar si falla en Mediastream
       }
@@ -185,7 +187,7 @@ export class MigrationService {
 
     const mappings = JSON.parse(migration.mappings) as MappingConfig[];
 
-    const msConfig = await this.mediastream.createMigration({
+    const msConfig = await (await this.ms()).createMigration({
       name: migration.name,
       strategy: migration.strategy as 'transcode' | 'upload',
       mappings,
@@ -210,7 +212,7 @@ export class MigrationService {
       throw new Error('Migración no creada en Mediastream');
     }
 
-    await this.mediastream.startMigration(migration.mediastreamConfigId);
+    await (await this.ms()).startMigration(migration.mediastreamConfigId);
 
     await this.prisma.migration.update({
       where: { id: migrationId },
@@ -233,7 +235,7 @@ export class MigrationService {
       throw new Error('Migración no creada en Mediastream');
     }
 
-    await this.mediastream.stopMigration(migration.mediastreamConfigId);
+    await (await this.ms()).stopMigration(migration.mediastreamConfigId);
 
     await this.updateStatus(migrationId, 'paused');
 
@@ -250,7 +252,7 @@ export class MigrationService {
       throw new Error('Migración no creada en Mediastream');
     }
 
-    await this.mediastream.retryMigration(migration.mediastreamConfigId);
+    await (await this.ms()).retryMigration(migration.mediastreamConfigId);
 
     await this.prisma.migration.update({
       where: { id: migrationId },
@@ -277,7 +279,7 @@ export class MigrationService {
     const migration = await this.getById(migrationId);
     if (!migration || !migration.mediastreamConfigId) return null;
 
-    const stats = await this.mediastream.getMigrationStats(migration.mediastreamConfigId);
+    const stats = await (await this.ms()).getMigrationStats(migration.mediastreamConfigId);
 
     return this.enrichStats(migrationId, stats);
   }
@@ -361,7 +363,7 @@ export class MigrationService {
         return;
       }
 
-      const stats = await this.mediastream.getMigrationStats(migration.mediastreamConfigId);
+      const stats = await (await this.ms()).getMigrationStats(migration.mediastreamConfigId);
       const enrichedStats = this.enrichStats(migrationId, stats);
 
       // Guardar histórico de stats

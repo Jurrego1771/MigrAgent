@@ -10,6 +10,9 @@ import WizardStepper from '../components/wizard/WizardStepper';
 import AuthStep from '../components/wizard/steps/AuthStep';
 import AccountValidationStep from '../components/wizard/steps/AccountValidationStep';
 import CSVMappingStep from '../components/wizard/steps/CSVMappingStep';
+import URLValidationStep from '../components/wizard/steps/URLValidationStep';
+import ValidationReportStep from '../components/wizard/steps/ValidationReportStep';
+import ConfirmStep from '../components/wizard/steps/ConfirmStep';
 import { COLORS } from '../theme';
 
 // ---------------------------------------------------------------------------
@@ -23,9 +26,9 @@ function StepContent() {
     case 1: return <AuthStep />;
     case 2: return <AccountValidationStep />;
     case 3: return <CSVMappingStep />;
-    case 4: return <PlaceholderStep stepId={4} />;
-    case 5: return <PlaceholderStep stepId={5} />;
-    case 6: return <PlaceholderStep stepId={6} />;
+    case 4: return <URLValidationStep />;
+    case 5: return <ValidationReportStep />;
+    case 6: return <ConfirmStep />;
     default: return null;
   }
 }

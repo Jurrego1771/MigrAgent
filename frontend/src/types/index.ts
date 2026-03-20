@@ -85,6 +85,29 @@ export interface CSVWizardState {
   normalizedTempId: string | null;      // ID del CSV normalizado (listo para SM2)
 }
 
+// ==================== URL Validation Wizard (Step 4) ====================
+
+export interface DomainSummary {
+  total: number;
+  accessible: number;
+  rateLimited: number;
+}
+
+export interface URLValidationSummary {
+  total: number;
+  accessible: number;
+  failed: number;
+  withRateLimit: number;
+  byDomain: Record<string, DomainSummary>;
+}
+
+export interface URLValidationWizardState {
+  status: 'idle' | 'checking' | 'done';
+  summary: URLValidationSummary | null;
+  results: URLCheckResult[];
+  checkedAt: string | null;
+}
+
 // Estado del paso 2 del wizard
 export interface AccountValidationState {
   accountInfo: AccountInfo | null;

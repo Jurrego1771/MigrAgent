@@ -16,6 +16,7 @@ import {
   AuthValidateResult,
   AccountInfo,
   RenditionsInfo,
+  URLValidationSummary,
 } from '../types';
 
 const api = axios.create({
@@ -238,6 +239,26 @@ export const csvApi = {
   },
 
   downloadTemp: (tempId: string): string => `/api/csv/temp/${tempId}/download`,
+
+  extractUrls: async (
+    tempId: string,
+    mappings: MappingConfig[]
+  ): Promise<{ urls: string[]; count: number }> => {
+    const { data } = await api.post(`/csv/temp/${tempId}/extract-urls`, { mappings });
+    return data;
+  },
+
+  validateUrls: async (
+    tempId: string,
+    mappings: MappingConfig[],
+    concurrency?: number
+  ): Promise<{ results: URLCheckResult[]; summary: URLValidationSummary }> => {
+    const { data } = await api.post(`/csv/temp/${tempId}/validate-urls`, {
+      mappings,
+      concurrency,
+    });
+    return data;
+  },
 };
 
 // ==================== Alerts ====================
@@ -307,6 +328,21 @@ export const accountApi = {
 
   getCategories: async (search?: string): Promise<{ categories: unknown[] }> => {
     const { data } = await api.get('/account/categories', { params: search ? { search } : {} });
+    return data;
+  },
+};
+
+// ==================== Wizard ====================
+
+export const wizardApi = {
+  createMigration: async (params: {
+    name: string;
+    strategy: 'transcode' | 'upload';
+    mappings: MappingConfig[];
+    normalizedTempId: string;
+    templateId?: string;
+  }): Promise<{ migrationId: string; mediastreamId: string }> => {
+    const { data } = await api.post('/wizard/create', params);
     return data;
   },
 };

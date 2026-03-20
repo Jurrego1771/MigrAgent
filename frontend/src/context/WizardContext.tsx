@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
-import { SessionInfo, AccountValidationState, CSVWizardState, MappingConfig, ExtraColumn } from '../types';
+import { SessionInfo, AccountValidationState, CSVWizardState, MappingConfig, ExtraColumn, URLValidationWizardState } from '../types';
 
 // ---------------------------------------------------------------------------
 // Definición de pasos
@@ -38,6 +38,9 @@ export interface WizardState {
 
   // Step 3 — CSV
   csvStep: CSVWizardState;
+
+  // Step 4 — URL Validation
+  urlValidation: URLValidationWizardState;
 }
 
 const DEFAULT_CSV_STATE: CSVWizardState = {
@@ -45,6 +48,13 @@ const DEFAULT_CSV_STATE: CSVWizardState = {
   mappings: [],
   extraColumns: [],
   normalizedTempId: null,
+};
+
+const DEFAULT_URL_VALIDATION: URLValidationWizardState = {
+  status: 'idle',
+  summary: null,
+  results: [],
+  checkedAt: null,
 };
 
 const DEFAULT_ACCOUNT_VALIDATION: AccountValidationState = {
@@ -68,6 +78,7 @@ interface WizardContextValue extends WizardState {
   setCsvStep: (update: Partial<CSVWizardState>) => void;
   setMappings: (mappings: MappingConfig[]) => void;
   setExtraColumns: (cols: ExtraColumn[]) => void;
+  setUrlValidation: (update: Partial<URLValidationWizardState>) => void;
   canGoNext: boolean;
   isStepComplete: (step: number) => boolean;
   isStepAccessible: (step: number) => boolean;
@@ -87,6 +98,7 @@ export function WizardProvider({ children }: { children: ReactNode }) {
     DEFAULT_ACCOUNT_VALIDATION
   );
   const [csvStep, setCsvStepState] = useState<CSVWizardState>(DEFAULT_CSV_STATE);
+  const [urlValidation, setUrlValidationState] = useState<URLValidationWizardState>(DEFAULT_URL_VALIDATION);
 
   const setAccountValidation = useCallback((update: Partial<AccountValidationState>) => {
     setAccountValidationState((prev) => ({ ...prev, ...update }));
@@ -102,6 +114,10 @@ export function WizardProvider({ children }: { children: ReactNode }) {
 
   const setExtraColumns = useCallback((cols: ExtraColumn[]) => {
     setCsvStepState((prev) => ({ ...prev, extraColumns: cols }));
+  }, []);
+
+  const setUrlValidation = useCallback((update: Partial<URLValidationWizardState>) => {
+    setUrlValidationState((prev) => ({ ...prev, ...update }));
   }, []);
 
   const markStepComplete = useCallback((step: number) => {
@@ -161,6 +177,8 @@ export function WizardProvider({ children }: { children: ReactNode }) {
           mappings.some((m) => m.mapper === 'rendition');
         return hasId && hasTitle && hasUrl;
       }
+      case 4:
+        return urlValidation.status === 'done';
       default: return true;
     }
   })();
@@ -174,6 +192,7 @@ export function WizardProvider({ children }: { children: ReactNode }) {
         session,
         accountValidation,
         csvStep,
+        urlValidation,
         goNext,
         goBack,
         goToStep,
@@ -183,6 +202,7 @@ export function WizardProvider({ children }: { children: ReactNode }) {
         setCsvStep,
         setMappings,
         setExtraColumns,
+        setUrlValidation,
         canGoNext,
         isStepComplete,
         isStepAccessible,

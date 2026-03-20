@@ -43,3 +43,6 @@ uploads/
 # Misc
 .cache/
 .temp/
+
+# Claude Code local config
+.claude/

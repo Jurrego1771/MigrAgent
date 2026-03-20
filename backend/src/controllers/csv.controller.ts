@@ -222,6 +222,72 @@ export class CSVController {
     res.sendFile(filePath);
   }
 
+  // POST /api/csv/temp/:id/extract-urls — extrae URLs del CSV según mappings
+  static async extractUrlsFromTemp(req: Request, res: Response) {
+    const { id } = req.params as { id: string };
+    const { mappings = [] } = req.body as { mappings: MappingConfig[] };
+
+    const filePath = path.join(TEMP_DIR, `${id}.csv`);
+    try {
+      await fs.access(filePath);
+    } catch {
+      return res.status(404).json({ error: 'Archivo temporal no encontrado' });
+    }
+
+    const urls = await csvValidator.extractUrls(filePath, mappings);
+    res.json({ urls, count: urls.length });
+  }
+
+  // POST /api/csv/temp/:id/validate-urls — verifica accesibilidad de todas las URLs
+  static async validateUrlsFromTemp(req: Request, res: Response) {
+    const { id } = req.params as { id: string };
+    const { mappings = [], concurrency = 8 } = req.body as {
+      mappings: MappingConfig[];
+      concurrency?: number;
+    };
+
+    const filePath = path.join(TEMP_DIR, `${id}.csv`);
+    try {
+      await fs.access(filePath);
+    } catch {
+      return res.status(404).json({ error: 'Archivo temporal no encontrado' });
+    }
+
+    const urls = await csvValidator.extractUrls(filePath, mappings);
+    if (urls.length === 0) {
+      return res.json({
+        results: [],
+        summary: { total: 0, accessible: 0, failed: 0, withRateLimit: 0 },
+      });
+    }
+
+    const results = await urlValidator.checkUrls(urls, Math.min(concurrency, 20));
+
+    // Agrupar por dominio
+    const byDomain: Record<string, { total: number; accessible: number; rateLimited: number }> = {};
+    for (const r of results) {
+      try {
+        const host = new URL(r.url).hostname;
+        if (!byDomain[host]) byDomain[host] = { total: 0, accessible: 0, rateLimited: 0 };
+        byDomain[host].total++;
+        if (r.accessible) byDomain[host].accessible++;
+        if (r.hasRateLimit) byDomain[host].rateLimited++;
+      } catch {
+        // URL malformada
+      }
+    }
+
+    const summary = {
+      total: results.length,
+      accessible: results.filter((r) => r.accessible).length,
+      failed: results.filter((r) => !r.accessible).length,
+      withRateLimit: results.filter((r) => r.hasRateLimit).length,
+      byDomain,
+    };
+
+    res.json({ results, summary });
+  }
+
   // GET /api/csv/mapper-options - Obtener opciones de mappers disponibles
   static async getMapperOptions(req: Request, res: Response) {
     const mappers = [

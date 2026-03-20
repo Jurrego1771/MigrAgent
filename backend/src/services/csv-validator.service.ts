@@ -503,4 +503,30 @@ export class CSVValidatorService {
       parser.on('end', () => resolve(count));
     });
   }
+
+  async extractUrls(filePath: string, mappings: MappingConfig[]): Promise<string[]> {
+    const urlMappers = ['original', 'rendition', 'thumb'];
+    const urlFields = mappings
+      .filter((m) => urlMappers.includes(m.mapper))
+      .map((m) => m.field);
+
+    if (urlFields.length === 0) return [];
+
+    return new Promise((resolve, reject) => {
+      const urls: string[] = [];
+
+      createReadStream(filePath)
+        .pipe(parse({ columns: true, skip_empty_lines: true, trim: true }))
+        .on('data', (row: Record<string, string>) => {
+          for (const field of urlFields) {
+            const val = row[field]?.trim();
+            if (val && (val.startsWith('http://') || val.startsWith('https://'))) {
+              urls.push(val);
+            }
+          }
+        })
+        .on('end', () => resolve(urls))
+        .on('error', reject);
+    });
+  }
 }
