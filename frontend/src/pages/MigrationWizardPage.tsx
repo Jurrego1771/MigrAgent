@@ -9,6 +9,7 @@ import { WizardProvider, useWizard, WIZARD_STEPS } from '../context/WizardContex
 import WizardStepper from '../components/wizard/WizardStepper';
 import AuthStep from '../components/wizard/steps/AuthStep';
 import AccountValidationStep from '../components/wizard/steps/AccountValidationStep';
+import CSVMappingStep from '../components/wizard/steps/CSVMappingStep';
 import { COLORS } from '../theme';
 
 // ---------------------------------------------------------------------------
@@ -21,7 +22,7 @@ function StepContent() {
   switch (currentStep) {
     case 1: return <AuthStep />;
     case 2: return <AccountValidationStep />;
-    case 3: return <PlaceholderStep stepId={3} />;
+    case 3: return <CSVMappingStep />;
     case 4: return <PlaceholderStep stepId={4} />;
     case 5: return <PlaceholderStep stepId={5} />;
     case 6: return <PlaceholderStep stepId={6} />;

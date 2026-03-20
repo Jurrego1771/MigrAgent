@@ -92,6 +92,12 @@ router.post('/csv/check-urls', CSVController.checkUrls);
 router.post('/csv/check-url', CSVController.checkSingleUrl);
 router.get('/csv/mapper-options', CSVController.getMapperOptions);
 
+// CSV temp (wizard)
+router.post('/csv/temp', upload.single('file'), CSVController.uploadTemp);
+router.post('/csv/temp/:id/normalize', CSVController.normalizeTemp);
+router.delete('/csv/temp/:id', CSVController.cleanupTemp);
+router.get('/csv/temp/:id/download', CSVController.downloadTemp);
+
 // ==================== Alert Routes ====================
 router.get('/alerts', AlertController.list);
 router.put('/alerts/:id/acknowledge', AlertController.acknowledge);

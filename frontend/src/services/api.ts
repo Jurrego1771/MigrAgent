@@ -214,6 +214,30 @@ export const csvApi = {
     const { data } = await api.get('/csv/mapper-options');
     return data;
   },
+
+  // Wizard: archivos temporales
+  uploadTemp: async (file: File): Promise<import('../types').TempCSVInfo & { tempId: string }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const { data } = await api.post('/csv/temp', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return data;
+  },
+
+  normalizeTemp: async (
+    tempId: string,
+    extraColumns: { name: string; defaultValue: string }[]
+  ): Promise<{ normalizedTempId: string; rowCount: number; addedColumns: string[] }> => {
+    const { data } = await api.post(`/csv/temp/${tempId}/normalize`, { extraColumns });
+    return data;
+  },
+
+  cleanupTemp: async (tempId: string): Promise<void> => {
+    await api.delete(`/csv/temp/${tempId}`);
+  },
+
+  downloadTemp: (tempId: string): string => `/api/csv/temp/${tempId}/download`,
 };
 
 // ==================== Alerts ====================

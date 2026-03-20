@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
-import { SessionInfo, AccountValidationState } from '../types';
+import { SessionInfo, AccountValidationState, CSVWizardState, MappingConfig, ExtraColumn } from '../types';
 
 // ---------------------------------------------------------------------------
 // Definición de pasos
@@ -35,7 +35,17 @@ export interface WizardState {
 
   // Step 2 — Account
   accountValidation: AccountValidationState;
+
+  // Step 3 — CSV
+  csvStep: CSVWizardState;
 }
+
+const DEFAULT_CSV_STATE: CSVWizardState = {
+  tempFile: null,
+  mappings: [],
+  extraColumns: [],
+  normalizedTempId: null,
+};
 
 const DEFAULT_ACCOUNT_VALIDATION: AccountValidationState = {
   accountInfo: null,
@@ -55,6 +65,9 @@ interface WizardContextValue extends WizardState {
   markStepComplete: (step: number) => void;
   setSession: (session: SessionInfo | null) => void;
   setAccountValidation: (update: Partial<AccountValidationState>) => void;
+  setCsvStep: (update: Partial<CSVWizardState>) => void;
+  setMappings: (mappings: MappingConfig[]) => void;
+  setExtraColumns: (cols: ExtraColumn[]) => void;
   canGoNext: boolean;
   isStepComplete: (step: number) => boolean;
   isStepAccessible: (step: number) => boolean;
@@ -73,9 +86,22 @@ export function WizardProvider({ children }: { children: ReactNode }) {
   const [accountValidation, setAccountValidationState] = useState<AccountValidationState>(
     DEFAULT_ACCOUNT_VALIDATION
   );
+  const [csvStep, setCsvStepState] = useState<CSVWizardState>(DEFAULT_CSV_STATE);
 
   const setAccountValidation = useCallback((update: Partial<AccountValidationState>) => {
     setAccountValidationState((prev) => ({ ...prev, ...update }));
+  }, []);
+
+  const setCsvStep = useCallback((update: Partial<CSVWizardState>) => {
+    setCsvStepState((prev) => ({ ...prev, ...update }));
+  }, []);
+
+  const setMappings = useCallback((mappings: MappingConfig[]) => {
+    setCsvStepState((prev) => ({ ...prev, mappings }));
+  }, []);
+
+  const setExtraColumns = useCallback((cols: ExtraColumn[]) => {
+    setCsvStepState((prev) => ({ ...prev, extraColumns: cols }));
   }, []);
 
   const markStepComplete = useCallback((step: number) => {
@@ -125,6 +151,16 @@ export function WizardProvider({ children }: { children: ReactNode }) {
           accountValidation.hasAdvertising !== null &&
           accountValidation.migrationName.trim().length > 0
         );
+      case 3: {
+        const { tempFile, mappings } = csvStep;
+        if (!tempFile) return false;
+        const hasId = mappings.some((m) => m.mapper === 'id');
+        const hasTitle = mappings.some((m) => m.mapper === 'title');
+        const hasUrl =
+          mappings.some((m) => m.mapper === 'original') ||
+          mappings.some((m) => m.mapper === 'rendition');
+        return hasId && hasTitle && hasUrl;
+      }
       default: return true;
     }
   })();
@@ -137,12 +173,16 @@ export function WizardProvider({ children }: { children: ReactNode }) {
         steps: WIZARD_STEPS,
         session,
         accountValidation,
+        csvStep,
         goNext,
         goBack,
         goToStep,
         markStepComplete,
         setSession,
         setAccountValidation,
+        setCsvStep,
+        setMappings,
+        setExtraColumns,
         canGoNext,
         isStepComplete,
         isStepAccessible,

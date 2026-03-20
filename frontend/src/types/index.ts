@@ -59,6 +59,32 @@ export interface RenditionsInfo {
   allVideoProfiles: string[];
 }
 
+// ==================== CSV Wizard ====================
+
+export interface TempCSVInfo {
+  tempId: string;
+  fileName: string;
+  headers: string[];
+  rowCount: number;
+  detectedMappings: DetectedMapping[];
+  emptyFields: Record<string, number>;
+  preview: CSVPreviewRow[];
+  warnings: CSVValidationWarning[];
+}
+
+export interface ExtraColumn {
+  name: string;
+  defaultValue: string;
+  reason: string; // por qué se sugiere
+}
+
+export interface CSVWizardState {
+  tempFile: TempCSVInfo | null;
+  mappings: MappingConfig[];            // editados por el usuario
+  extraColumns: ExtraColumn[];          // columnas adicionales a agregar
+  normalizedTempId: string | null;      // ID del CSV normalizado (listo para SM2)
+}
+
 // Estado del paso 2 del wizard
 export interface AccountValidationState {
   accountInfo: AccountInfo | null;

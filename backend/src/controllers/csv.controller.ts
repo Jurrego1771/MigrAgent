@@ -3,6 +3,13 @@ import { CSVValidatorService } from '../services/csv-validator.service.js';
 import { URLValidatorService } from '../services/url-validator.service.js';
 import { MappingConfig } from '../types/index.js';
 import fs from 'fs/promises';
+import path from 'path';
+import { v4 as uuidv4 } from 'uuid';
+
+const TEMP_DIR = path.join(process.cwd(), 'uploads', 'temp');
+
+// Asegurar que exista el directorio temporal
+fs.mkdir(TEMP_DIR, { recursive: true }).catch(() => {});
 
 const csvValidator = new CSVValidatorService();
 const urlValidator = new URLValidatorService();
@@ -123,6 +130,96 @@ export class CSVController {
     };
 
     res.json(formatted);
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Endpoints de archivos temporales (wizard)
+  // ──────────────────────────────────────────────────────────────────────────
+
+  // POST /api/csv/temp — sube un CSV, lo analiza y persiste en temp dir
+  static async uploadTemp(req: Request, res: Response) {
+    const file = req.file;
+    if (!file) return res.status(400).json({ error: 'Archivo CSV requerido' });
+
+    const tempId = uuidv4();
+    const destPath = path.join(TEMP_DIR, `${tempId}.csv`);
+
+    try {
+      await fs.rename(file.path, destPath);
+
+      const [headers, rowCount, analysisResult] = await Promise.all([
+        csvValidator.getHeaders(destPath),
+        csvValidator.getRowCount(destPath),
+        csvValidator.validateCSV(destPath, undefined, { checkUrls: false, sampleSize: 5 }),
+      ]);
+
+      res.json({
+        tempId,
+        fileName: file.originalname,
+        headers,
+        rowCount,
+        detectedMappings: analysisResult.detectedMappings || [],
+        emptyFields: analysisResult.emptyFields,
+        preview: analysisResult.preview,
+        warnings: analysisResult.warnings.filter((w) => w.row === 0),
+      });
+    } catch (error) {
+      await fs.unlink(destPath).catch(() => {});
+      await fs.unlink(file.path).catch(() => {});
+      throw error;
+    }
+  }
+
+  // POST /api/csv/temp/:id/normalize — genera CSV normalizado con columnas extra
+  static async normalizeTemp(req: Request, res: Response) {
+    const { id } = req.params as { id: string };
+    const { extraColumns = [] } = req.body as {
+      extraColumns?: { name: string; defaultValue: string }[];
+    };
+
+    const inputPath = path.join(TEMP_DIR, `${id}.csv`);
+
+    try {
+      await fs.access(inputPath);
+    } catch {
+      return res.status(404).json({ error: 'Archivo temporal no encontrado. Sube el CSV nuevamente.' });
+    }
+
+    const normalizedId = uuidv4();
+    const outputPath = path.join(TEMP_DIR, `${normalizedId}.csv`);
+
+    const result = await csvValidator.normalizeCSV(inputPath, outputPath, extraColumns);
+
+    res.json({
+      normalizedTempId: normalizedId,
+      rowCount: result.rowCount,
+      addedColumns: result.addedColumns,
+    });
+  }
+
+  // DELETE /api/csv/temp/:id — elimina archivo temporal
+  static async cleanupTemp(req: Request, res: Response) {
+    const { id } = req.params as { id: string };
+    const filePath = path.join(TEMP_DIR, `${id}.csv`);
+
+    await fs.unlink(filePath).catch(() => {});
+    res.json({ success: true });
+  }
+
+  // GET /api/csv/temp/:id/download — descarga el archivo normalizado
+  static async downloadTemp(req: Request, res: Response) {
+    const { id } = req.params as { id: string };
+    const filePath = path.join(TEMP_DIR, `${id}.csv`);
+
+    try {
+      await fs.access(filePath);
+    } catch {
+      return res.status(404).json({ error: 'Archivo no encontrado' });
+    }
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="normalized-${id}.csv"`);
+    res.sendFile(filePath);
   }
 
   // GET /api/csv/mapper-options - Obtener opciones de mappers disponibles

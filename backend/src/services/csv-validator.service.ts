@@ -1,5 +1,8 @@
 import { parse } from 'csv-parse';
-import { createReadStream } from 'fs';
+import { stringify } from 'csv-stringify';
+import { createReadStream, createWriteStream } from 'fs';
+import { pipeline } from 'stream/promises';
+import path from 'path';
 import {
   CSVValidationResult,
   CSVValidationError,
@@ -428,6 +431,58 @@ export class CSVValidatorService {
 
       parser.on('error', reject);
     });
+  }
+
+  /**
+   * Genera un CSV normalizado a partir del original:
+   * - Recorta espacios en todos los valores
+   * - Agrega columnas extra con valores por defecto
+   * - Escribe el resultado en outputPath
+   */
+  async normalizeCSV(
+    inputPath: string,
+    outputPath: string,
+    extraColumns: { name: string; defaultValue: string }[] = []
+  ): Promise<{ rowCount: number; addedColumns: string[] }> {
+    const rows: Record<string, string>[] = [];
+
+    await new Promise<void>((resolve, reject) => {
+      const parser = createReadStream(inputPath).pipe(
+        parse({ columns: true, skip_empty_lines: true, trim: true, relax_column_count: true })
+      );
+      parser.on('data', (row: Record<string, string>) => rows.push(row));
+      parser.on('error', reject);
+      parser.on('end', resolve);
+    });
+
+    if (rows.length === 0) return { rowCount: 0, addedColumns: [] };
+
+    const addedColumns = extraColumns.map((c) => c.name);
+    const headers = [...Object.keys(rows[0]), ...addedColumns];
+
+    const normalizedRows = rows.map((row) => {
+      const normalized: Record<string, string> = {};
+      for (const [k, v] of Object.entries(row)) {
+        normalized[k] = typeof v === 'string' ? v.trim() : v;
+      }
+      for (const extra of extraColumns) {
+        normalized[extra.name] = extra.defaultValue;
+      }
+      return normalized;
+    });
+
+    await pipeline(
+      (async function* () {
+        yield headers;
+        for (const row of normalizedRows) {
+          yield headers.map((h) => row[h] ?? '');
+        }
+      })(),
+      stringify(),
+      createWriteStream(outputPath)
+    );
+
+    return { rowCount: rows.length, addedColumns };
   }
 
   async getRowCount(filePath: string): Promise<number> {
