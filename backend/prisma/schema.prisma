@@ -1,0 +1,191 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Templates de migración reutilizables
+model Template {
+  id              String   @id @default(uuid())
+  name            String
+  description     String?
+  strategy        String   // 'transcode' | 'upload'
+  mappings        String   // JSON stringified
+  expectedHeaders String   // JSON stringified - headers esperados
+  usageCount      Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  migrations Migration[]
+}
+
+// Historial de migraciones ejecutadas
+model Migration {
+  id                  String   @id @default(uuid())
+  name                String
+  mediastreamConfigId String?  // ID de la config en Mediastream
+  templateId          String?
+  template            Template? @relation(fields: [templateId], references: [id])
+  status              String   @default("created") // created, validating, validated, running, paused, done, error
+  strategy            String
+  mappings            String   // JSON stringified
+  csvFileName         String?
+  totalItems          Int      @default(0)
+  processedItems      Int      @default(0)
+  successItems        Int      @default(0)
+  errorItems          Int      @default(0)
+
+  // Estadísticas de velocidad
+  startedAt           DateTime?
+  completedAt         DateTime?
+  lastUpdateAt        DateTime?
+
+  // Política de reintentos
+  retryEnabled        Boolean  @default(true)
+  maxRetries          Int      @default(3)
+  currentRetryCount   Int      @default(0)
+  retryBackoffType    String   @default("exponential") // fixed, linear, exponential
+  retryInitialDelay   Int      @default(60000) // ms
+  retryMaxDelay       Int      @default(3600000) // ms
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  validationResults ValidationResult[]
+  logs              MigrationLog[]
+  alerts            Alert[]
+  statsHistory      StatsHistory[]
+}
+
+// Resultados de validación de CSV
+model ValidationResult {
+  id          String    @id @default(uuid())
+  migrationId String
+  migration   Migration @relation(fields: [migrationId], references: [id], onDelete: Cascade)
+
+  isValid     Boolean
+  totalRows   Int
+  validRows   Int
+  errorRows   Int
+  warningRows Int
+
+  // Errores detallados - JSON stringified
+  errors      String    // [{row, field, error, value}]
+  warnings    String    // [{row, field, warning, value}]
+
+  // Información de URLs
+  urlsChecked     Int       @default(0)
+  urlsAccessible  Int       @default(0)
+  urlsWithRateLimit Int     @default(0)
+  urlDetails      String?   // JSON - detalles de cada URL (peso, duración, calidad)
+
+  // Duplicados detectados
+  duplicates  String?   // JSON - [{id, rows}]
+
+  // Campos vacíos
+  emptyFields String?   // JSON - {fieldName: count}
+
+  createdAt   DateTime  @default(now())
+}
+
+// Logs de operaciones
+model MigrationLog {
+  id          String    @id @default(uuid())
+  migrationId String
+  migration   Migration @relation(fields: [migrationId], references: [id], onDelete: Cascade)
+
+  level       String    // info, warn, error, debug
+  category    String    // validation, processing, retry, system
+  message     String
+  data        String?   // JSON - datos adicionales
+
+  createdAt   DateTime  @default(now())
+}
+
+// Alertas generadas
+model Alert {
+  id          String    @id @default(uuid())
+  migrationId String?
+  migration   Migration? @relation(fields: [migrationId], references: [id], onDelete: Cascade)
+
+  type        String    // stalled, error_threshold, retry_exhausted, completed
+  severity    String    // info, warning, critical
+  message     String
+  data        String?   // JSON
+  acknowledged Boolean  @default(false)
+
+  createdAt   DateTime  @default(now())
+}
+
+// Historial de estadísticas para gráficos
+model StatsHistory {
+  id          String    @id @default(uuid())
+  migrationId String
+  migration   Migration @relation(fields: [migrationId], references: [id], onDelete: Cascade)
+
+  waiting     Int
+  queued      Int
+  running     Int
+  done        Int
+  error       Int
+
+  // Calculados
+  speed       Float     @default(0) // items por minuto
+
+  timestamp   DateTime  @default(now())
+}
+
+// Configuración global
+model Settings {
+  id                    String   @id @default("default")
+  mediastreamApiUrl     String   @default("https://api.mediastream.com")
+  mediastreamAccountId  String?
+
+  // Alertas
+  alertOnStalled        Boolean  @default(true)
+  stalledThresholdMs    Int      @default(900000) // 15 minutos
+  alertOnErrorThreshold Boolean  @default(true)
+  errorThresholdPercent Int      @default(10)
+
+  // Validación de URLs
+  urlCheckTimeout       Int      @default(10000) // 10 segundos
+  urlCheckConcurrency   Int      @default(5)
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+// Mappers disponibles con su configuración
+model MapperConfig {
+  id          String   @id @default(uuid())
+  name        String   @unique // id, title, original, category, etc.
+  displayName String
+  description String?
+  required    Boolean  @default(false)
+  strategy    String?  // null = ambos, 'transcode', 'upload'
+  optionsSchema String? // JSON Schema para opciones
+
+  createdAt   DateTime @default(now())
+}
+
+// Sesiones autenticadas con Mediastream (credenciales cifradas AES-256-GCM)
+model AuthSession {
+  id              String   @id @default(uuid())
+  accountId       String
+  accountName     String?
+  userEmail       String
+
+  // Credenciales cifradas — formato: iv_hex:authTag_hex:ciphertext_hex
+  encryptedJwt    String
+  encryptedSid    String   // connect.sid
+
+  apiUrl          String
+  expiresAt       DateTime
+  isActive        Boolean  @default(true)
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
