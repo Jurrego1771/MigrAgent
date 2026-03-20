@@ -96,9 +96,9 @@ export class AuthService {
   static async login(params: LoginParams): Promise<SessionInfo> {
     const apiUrl = params.apiUrl || config.mediastream.apiUrl;
 
-    // Construir el body — SM2 acepta { login, password } o { email, password }
+    // SM2 POST /login acepta { username, password } (puede ser email o nombre de usuario)
     const loginBody: Record<string, string> = {
-      login: params.email,
+      username: params.email,
       password: params.password,
     };
     if (params.totp) {
@@ -113,30 +113,35 @@ export class AuthService {
     let expiresAt: Date;
 
     try {
-      const response = await axios.post(`${apiUrl}/api/auth/issue`, loginBody, {
-        headers: { 'Content-Type': 'application/json' },
-        timeout: 15000,
-        // No seguir redirect para poder leer los headers de la respuesta directa
-        maxRedirects: 5,
-      });
+      // SM2 usa POST /login (web form), no una REST API.
+      // Debemos capturar el connect.sid del redirect y luego
+      // obtener el JWT desde una cookie que SM2 inyecta en respuestas autenticadas.
+      const loginResponse = await axios.post(
+        `${apiUrl}/login`,
+        loginBody,
+        {
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 15000,
+          maxRedirects: 0,              // no seguir redirect — necesitamos los headers
+          validateStatus: (s) => s < 500, // aceptar 302
+        }
+      );
 
-      const data = response.data;
-
-      // SM2 puede devolver el token de distintas formas según la versión
-      jwt =
-        data?.token ||
-        data?.jwt ||
-        data?.data?.token ||
-        data?.data?.jwt ||
-        '';
-
-      if (!jwt) {
-        throw new Error('SM2 no devolvió un token JWT en la respuesta.');
+      // Detectar TOTP: SM2 redirige a /login/totp cuando está habilitado
+      const location = loginResponse.headers['location'] || '';
+      if (location.includes('/login/totp')) {
+        const totpError = new Error('Esta cuenta requiere código TOTP (2FA).');
+        (totpError as any).code = 'TOTP_REQUIRED';
+        throw totpError;
       }
 
-      // Extraer connect.sid de Set-Cookie
-      const setCookieHeader = response.headers['set-cookie'];
-      sid = AuthService._extractConnectSid(setCookieHeader);
+      // Detectar credenciales inválidas: SM2 redirige a /?loginerror
+      if (location.includes('loginerror') || location.includes('errorInvalidIp')) {
+        throw new Error('Credenciales incorrectas. Verifica usuario y contraseña.');
+      }
+
+      // Capturar connect.sid del Set-Cookie del login
+      sid = AuthService._extractConnectSid(loginResponse.headers['set-cookie']);
 
       if (!sid) {
         throw new Error(
@@ -144,56 +149,59 @@ export class AuthService {
         );
       }
 
-      // Extraer info del usuario desde el payload del JWT (no necesitamos verificar firma aquí)
+      // Obtener el JWT: SM2 lo inyecta como cookie 'jwt' al responder a rutas autenticadas.
+      // Llamamos /api/account con la sesión recién creada para recibirlo.
+      const accountResponse = await axios.get(`${apiUrl}/api/account`, {
+        headers: { Cookie: `connect.sid=${sid}` },
+        timeout: 10000,
+        validateStatus: () => true,
+      });
+
+      // El JWT viene en la cookie 'jwt' del response
+      jwt = AuthService._extractCookieValue('jwt', accountResponse.headers['set-cookie']);
+
+      // Fallback: a veces viene en x-api-token o en el body
+      if (!jwt) {
+        jwt =
+          accountResponse.data?.token ||
+          accountResponse.data?.jwt ||
+          '';
+      }
+
+      if (!jwt) {
+        throw new Error(
+          'No se pudo obtener el JWT de SM2. La sesión puede haber expirado inmediatamente o el usuario no tiene permisos suficientes.'
+        );
+      }
+
+      // Extraer info del usuario desde el payload del JWT
       const payload = AuthService._decodeJwtPayload(jwt);
       accountId = String(payload?.account || '');
       userEmail = String(payload?.email || params.email);
 
-      // El JWT de SM2 expira en 1 día por defecto
       const exp = payload?.exp;
       expiresAt =
         typeof exp === 'number'
           ? new Date(exp * 1000)
           : new Date(Date.now() + 24 * 60 * 60 * 1000);
 
-      // Intentar obtener el nombre de la cuenta
-      try {
-        const accountResponse = await axios.get(`${apiUrl}/api/account`, {
-          headers: {
-            'x-api-token': jwt,
-            Cookie: `connect.sid=${sid}; jwt=${jwt}`,
-          },
-          timeout: 10000,
-        });
-        accountName =
-          accountResponse.data?.account?.name ||
-          accountResponse.data?.data?.account?.name ||
-          undefined;
+      // Obtener nombre de cuenta desde la respuesta de /api/account
+      accountName =
+        accountResponse.data?.account?.name ||
+        accountResponse.data?.data?.account?.name ||
+        undefined;
 
-        // Si accountId estaba vacío, intentar obtenerlo de la respuesta
-        if (!accountId) {
-          accountId =
-            String(accountResponse.data?.account?._id || '') ||
-            String(accountResponse.data?.data?.account?._id || '');
-        }
-      } catch {
-        // No es bloqueante — continuar sin el nombre
+      if (!accountId) {
+        accountId =
+          String(accountResponse.data?.account?._id || '') ||
+          String(accountResponse.data?.data?.account?._id || '');
       }
     } catch (err: any) {
+      if ((err as any).code === 'TOTP_REQUIRED') throw err;
       if (axios.isAxiosError(err)) {
         const status = err.response?.status;
-        const data = err.response?.data;
-
         if (status === 401 || status === 403) {
           throw new Error('Credenciales incorrectas. Verifica email y contraseña.');
-        }
-        if (data?.data === 'TOTP_REQUIRED' || data?.totp === true) {
-          const totpError = new Error('Esta cuenta requiere código TOTP (2FA).');
-          (totpError as any).code = 'TOTP_REQUIRED';
-          throw totpError;
-        }
-        if (data?.data === 'INVALID_TOTP') {
-          throw new Error('Código TOTP incorrecto.');
         }
       }
       throw err;
@@ -301,13 +309,22 @@ export class AuthService {
     }
 
     try {
-      await axios.get(`${session.apiUrl}/api/auth/token`, {
+      // Validar la sesión contra SM2 llamando a un endpoint autenticado
+      const checkResponse = await axios.get(`${session.apiUrl}/api/account`, {
         headers: {
           'x-api-token': jwt,
-          Cookie: `connect.sid=${sid}; jwt=${jwt}`,
+          Cookie: `connect.sid=${sid}`,
         },
         timeout: 10000,
+        validateStatus: (s) => s < 500,
       });
+      if (checkResponse.status === 403 || checkResponse.status === 401) {
+        await prisma.authSession.update({
+          where: { id: session.id },
+          data: { isActive: false },
+        });
+        return { valid: false, session: null, reason: 'Token revocado por SM2. Inicia sesión nuevamente.' };
+      }
       return { valid: true, session: AuthService._toPublic(session) };
     } catch (err: any) {
       const status = err?.response?.status;
@@ -403,15 +420,20 @@ export class AuthService {
   // ---------------------------------------------------------------------------
 
   private static _extractConnectSid(setCookieHeader: string | string[] | undefined): string {
+    return AuthService._extractCookieValue('connect.sid', setCookieHeader);
+  }
+
+  private static _extractCookieValue(
+    name: string,
+    setCookieHeader: string | string[] | undefined
+  ): string {
     if (!setCookieHeader) return '';
-
     const cookies = Array.isArray(setCookieHeader) ? setCookieHeader : [setCookieHeader];
-
+    const escapedName = name.replace('.', '\\.');
+    const re = new RegExp(`${escapedName}=([^;]+)`);
     for (const cookie of cookies) {
-      const match = cookie.match(/connect\.sid=([^;]+)/);
-      if (match) {
-        return decodeURIComponent(match[1]);
-      }
+      const match = cookie.match(re);
+      if (match) return decodeURIComponent(match[1]);
     }
     return '';
   }
