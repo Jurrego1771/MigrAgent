@@ -241,9 +241,10 @@ export class CSVController {
   // POST /api/csv/temp/:id/validate-urls — verifica accesibilidad de todas las URLs
   static async validateUrlsFromTemp(req: Request, res: Response) {
     const { id } = req.params as { id: string };
-    const { mappings = [], concurrency = 8 } = req.body as {
+    const { mappings = [], concurrency = 8, samplePercent = 100 } = req.body as {
       mappings: MappingConfig[];
       concurrency?: number;
+      samplePercent?: number;
     };
 
     const filePath = path.join(TEMP_DIR, `${id}.csv`);
@@ -253,13 +254,20 @@ export class CSVController {
       return res.status(404).json({ error: 'Archivo temporal no encontrado' });
     }
 
-    const urls = await csvValidator.extractUrls(filePath, mappings);
-    if (urls.length === 0) {
+    const allUrls = await csvValidator.extractUrls(filePath, mappings);
+    if (allUrls.length === 0) {
       return res.json({
         results: [],
-        summary: { total: 0, accessible: 0, failed: 0, withRateLimit: 0 },
+        summary: { total: 0, accessible: 0, failed: 0, withRateLimit: 0, sampledFrom: 0, samplePercent: 100 },
       });
     }
+
+    // Muestreo aleatorio si samplePercent < 100
+    const clampedPercent = Math.min(100, Math.max(1, samplePercent));
+    const sampleSize = Math.max(1, Math.ceil(allUrls.length * clampedPercent / 100));
+    const urls = clampedPercent < 100
+      ? allUrls.slice().sort(() => Math.random() - 0.5).slice(0, sampleSize)
+      : allUrls;
 
     const results = await urlValidator.checkUrls(urls, Math.min(concurrency, 20));
 
@@ -283,6 +291,8 @@ export class CSVController {
       failed: results.filter((r) => !r.accessible).length,
       withRateLimit: results.filter((r) => r.hasRateLimit).length,
       byDomain,
+      sampledFrom: allUrls.length,
+      samplePercent: clampedPercent,
     };
 
     res.json({ results, summary });

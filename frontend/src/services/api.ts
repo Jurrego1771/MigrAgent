@@ -251,11 +251,13 @@ export const csvApi = {
   validateUrls: async (
     tempId: string,
     mappings: MappingConfig[],
-    concurrency?: number
+    concurrency?: number,
+    samplePercent?: number
   ): Promise<{ results: URLCheckResult[]; summary: URLValidationSummary }> => {
     const { data } = await api.post(`/csv/temp/${tempId}/validate-urls`, {
       mappings,
       concurrency,
+      samplePercent,
     });
     return data;
   },

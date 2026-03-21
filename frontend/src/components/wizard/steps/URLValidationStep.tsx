@@ -235,9 +235,17 @@ function FailedUrlsSection({ results }: { results: URLCheckResult[] }) {
 // Main component
 // ---------------------------------------------------------------------------
 
+const SAMPLE_OPTIONS = [
+  { label: '5%', value: 5, desc: 'Verificación rápida de estructura' },
+  { label: '20%', value: 20, desc: 'Chequeo general' },
+  { label: '50%', value: 50, desc: 'Revisión exhaustiva' },
+  { label: '100%', value: 100, desc: 'Validación completa' },
+];
+
 export default function URLValidationStep() {
   const { csvStep, urlValidation, setUrlValidation } = useWizard();
   const [concurrency, setConcurrency] = useState(8);
+  const [samplePercent, setSamplePercent] = useState(100);
 
   const tempId = csvStep.normalizedTempId ?? csvStep.tempFile?.tempId ?? null;
 
@@ -250,7 +258,8 @@ export default function URLValidationStep() {
       const { results, summary } = await csvApi.validateUrls(
         tempId,
         csvStep.mappings,
-        concurrency
+        concurrency,
+        samplePercent
       );
       setUrlValidation({
         status: 'done',
@@ -262,7 +271,7 @@ export default function URLValidationStep() {
       setUrlValidation({ status: 'idle' });
       console.error('URL validation failed:', err);
     }
-  }, [tempId, csvStep.mappings, concurrency, setUrlValidation]);
+  }, [tempId, csvStep.mappings, concurrency, samplePercent, setUrlValidation]);
 
   const { status, summary, results } = urlValidation;
 
@@ -295,13 +304,40 @@ export default function URLValidationStep() {
         sx={{
           display: 'flex',
           alignItems: 'center',
-          gap: 2,
+          gap: 3,
           p: 2,
           borderRadius: 2,
           border: `1px solid ${alpha(COLORS.darkBorder, 0.8)}`,
           background: alpha(COLORS.darkCard, 0.5),
+          flexWrap: 'wrap',
         }}
       >
+        {/* Muestra a validar */}
+        <Box>
+          <Typography variant="caption" color="text.disabled" display="block">
+            Muestra a validar
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 1, mt: 0.5 }}>
+            {SAMPLE_OPTIONS.map((opt) => (
+              <Tooltip key={opt.value} title={opt.desc} placement="top">
+                <Chip
+                  label={opt.label}
+                  size="small"
+                  onClick={() => setSamplePercent(opt.value)}
+                  sx={{
+                    cursor: 'pointer',
+                    background:
+                      samplePercent === opt.value ? alpha(COLORS.neonGreen, 0.15) : alpha(COLORS.charcoal, 0.3),
+                    color: samplePercent === opt.value ? COLORS.neonGreen : 'text.secondary',
+                    border: `1px solid ${samplePercent === opt.value ? alpha(COLORS.neonGreen, 0.4) : 'transparent'}`,
+                    fontWeight: samplePercent === opt.value ? 700 : 400,
+                  }}
+                />
+              </Tooltip>
+            ))}
+          </Box>
+        </Box>
+
         <SpeedIcon sx={{ color: 'text.disabled' }} />
         <Box>
           <Typography variant="caption" color="text.disabled" display="block">
@@ -381,6 +417,25 @@ export default function URLValidationStep() {
       {/* Results */}
       {status === 'done' && summary && (
         <>
+          {/* Indicador de muestra */}
+          {summary.samplePercent < 100 && (
+            <Box
+              sx={{
+                px: 2, py: 1, borderRadius: 2,
+                background: alpha('#F5A623', 0.08),
+                border: `1px solid ${alpha('#F5A623', 0.3)}`,
+                display: 'flex', alignItems: 'center', gap: 1,
+              }}
+            >
+              <WarningIcon sx={{ color: '#F5A623', fontSize: 18 }} />
+              <Typography variant="caption" color="#F5A623">
+                Muestra del <strong>{summary.samplePercent}%</strong> — se verificaron{' '}
+                <strong>{summary.total}</strong> de <strong>{summary.sampledFrom}</strong> URLs totales.
+                Los resultados son representativos, no absolutos.
+              </Typography>
+            </Box>
+          )}
+
           {/* Summary cards */}
           <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
             <StatCard

@@ -99,6 +99,8 @@ export interface URLValidationSummary {
   failed: number;
   withRateLimit: number;
   byDomain: Record<string, DomainSummary>;
+  sampledFrom: number;
+  samplePercent: number;
 }
 
 export interface URLValidationWizardState {
