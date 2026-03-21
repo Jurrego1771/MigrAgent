@@ -30,15 +30,10 @@ export class MediastreamService {
       'Content-Type': 'application/json',
     };
 
-    if (jwt) {
-      headers['x-api-token'] = jwt;
-    }
-
-    const cookies: string[] = [];
-    if (sid) cookies.push(`connect.sid=${sid}`);
-    if (jwt) cookies.push(`jwt=${jwt}`);
-    if (cookies.length > 0) {
-      headers['Cookie'] = cookies.join('; ');
+    // SM2 salta el middleware de sesión cuando recibe x-api-token,
+    // lo que rompe req.session.aid. Usamos solo la cookie de sesión.
+    if (sid) {
+      headers['Cookie'] = `mdstrm.id=${sid}`;
     }
 
     this.client = axios.create({
@@ -342,9 +337,10 @@ export class MediastreamService {
     return response.data?.data || response.data;
   }
 
-  async getRenditionRules(): Promise<unknown[]> {
-    const response = await this.client.get('/api/account/rendition_rules');
-    return response.data?.data || response.data || [];
+  async getRenditionRules(): Promise<string[]> {
+    const response = await this.client.get('/api/account');
+    const account = response.data?.data?.account || response.data?.account || {};
+    return Array.isArray(account.auto_encoding_profiles) ? account.auto_encoding_profiles : [];
   }
 
   async getCategories(search?: string): Promise<unknown[]> {

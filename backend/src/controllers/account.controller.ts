@@ -81,32 +81,16 @@ export class AccountController {
    */
   static async getRenditions(req: Request, res: Response): Promise<void> {
     const service = await MediastreamService.fromActiveSession();
-    const rules = await service.getRenditionRules();
+    const activeProfiles = await service.getRenditionRules();
 
-    // Normalizar para el frontend
-    const normalized = (rules as Record<string, unknown>[]).map((rule) => ({
-      id: rule._id || rule.id,
-      name: rule.name,
-      code: rule.code,
-      profileRange: rule.profile_range as { min: string; max: string } | undefined,
-      profiles: Array.isArray(rule.profiles) ? rule.profiles : [],
-    }));
-
-    // Extraer todos los perfiles únicos activos
-    const activeProfiles = new Set<string>();
-    for (const rule of normalized) {
-      if (rule.profileRange?.min) activeProfiles.add(rule.profileRange.min);
-      if (rule.profileRange?.max) activeProfiles.add(rule.profileRange.max);
-      for (const p of rule.profiles) activeProfiles.add(p as string);
-    }
+    const activeProfilesSet = new Set(activeProfiles);
 
     // Clasificar: qué perfiles de video estándar están activos y cuáles faltan
-    const activeVideoProfiles = VIDEO_PROFILES_ORDERED.filter((p) => activeProfiles.has(p));
-    const missingVideoProfiles = VIDEO_PROFILES_ORDERED.filter((p) => !activeProfiles.has(p));
+    const activeVideoProfiles = VIDEO_PROFILES_ORDERED.filter((p) => activeProfilesSet.has(p));
+    const missingVideoProfiles = VIDEO_PROFILES_ORDERED.filter((p) => !activeProfilesSet.has(p));
 
     res.json({
-      rules: normalized,
-      activeProfiles: Array.from(activeProfiles),
+      activeProfiles,
       activeVideoProfiles,
       missingVideoProfiles,
       allVideoProfiles: VIDEO_PROFILES_ORDERED,

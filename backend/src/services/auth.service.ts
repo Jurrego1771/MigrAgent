@@ -152,7 +152,7 @@ export class AuthService {
       // Obtener el JWT: SM2 lo inyecta como cookie 'jwt' al responder a rutas autenticadas.
       // Llamamos /api/account con la sesión recién creada para recibirlo.
       const accountResponse = await axios.get(`${apiUrl}/api/account`, {
-        headers: { Cookie: `connect.sid=${sid}` },
+        headers: { Cookie: `mdstrm.id=${sid}` },
         timeout: 10000,
         validateStatus: () => true,
       });
@@ -283,8 +283,7 @@ export class AuthService {
     try {
       const accountResponse = await axios.get(`${apiUrl}/api/account`, {
         headers: {
-          'x-api-token': jwt,
-          Cookie: `connect.sid=${sid}; jwt=${jwt}`,
+          Cookie: `mdstrm.id=${sid}`,
         },
         timeout: 8000,
         validateStatus: () => true,
@@ -378,8 +377,7 @@ export class AuthService {
       // Validar la sesión contra SM2 llamando a un endpoint autenticado
       const checkResponse = await axios.get(`${session.apiUrl}/api/account`, {
         headers: {
-          'x-api-token': jwt,
-          Cookie: `connect.sid=${sid}`,
+          Cookie: `mdstrm.id=${sid}`,
         },
         timeout: 10000,
         validateStatus: (s) => s < 500,

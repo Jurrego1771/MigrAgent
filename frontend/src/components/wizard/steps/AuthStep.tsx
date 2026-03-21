@@ -69,7 +69,7 @@ export default function AuthStep() {
   const handleImport = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.jwt.trim() || !form.sid.trim()) {
-      setError('JWT y connect.sid son requeridos.');
+      setError('JWT y mdstrm.id son requeridos.');
       return;
     }
 
@@ -140,7 +140,7 @@ export default function AuthStep() {
           Conectar con Mediastream
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          Pega el JWT y el connect.sid desde las DevTools de tu browser mientras tienes sesión abierta en Mediastream.
+          Pega el JWT y el mdstrm.id desde las DevTools de tu browser mientras tienes sesión abierta en Mediastream.
         </Typography>
       </Box>
 
@@ -168,7 +168,7 @@ export default function AuthStep() {
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <PasteIcon sx={{ fontSize: '1rem', color: COLORS.neonGreen }} />
             <Typography variant="body2" fontWeight={600}>
-              ¿Cómo obtener el JWT y el connect.sid?
+              ¿Cómo obtener el JWT y el mdstrm.id?
             </Typography>
           </Box>
           {instructionsOpen
@@ -211,7 +211,7 @@ export default function AuthStep() {
 
             {/* Paso 5 */}
             <StepInstruction number={5}>
-              Copia el valor de la cookie <Code>connect.sid</Code> y pégalo en el campo <strong>Connect.sid</strong> abajo. Incluye el prefijo <Code>s%3A</Code> si aparece.
+              Copia el valor de la cookie <Code>mdstrm.id</Code> y pégalo en el campo <strong>Connect.sid</strong> abajo. Incluye el prefijo <Code>s%3A</Code> si aparece.
             </StepInstruction>
 
             <Alert severity="info" sx={{ fontSize: '0.78rem', mt: 0.5 }}>
@@ -257,15 +257,15 @@ export default function AuthStep() {
         helperText="Valor de la cookie 'jwt' en DevTools → Application → Cookies"
       />
 
-      {/* connect.sid */}
+      {/* mdstrm.id */}
       <TextField
-        label="connect.sid"
+        label="mdstrm.id"
         value={form.sid}
         onChange={handleChange('sid')}
         fullWidth
         placeholder="s%3AxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxXxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
         inputProps={{ style: { fontFamily: 'monospace', fontSize: '0.78rem' } }}
-        helperText="Valor de la cookie 'connect.sid' en DevTools → Application → Cookies"
+        helperText="Valor de la cookie 'mdstrm.id' en DevTools → Application → Cookies"
       />
 
       {/* Error */}
@@ -285,7 +285,7 @@ export default function AuthStep() {
         }}
       >
         <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.5 }}>
-          🔒 El JWT y el connect.sid se cifran con <strong>AES-256-GCM</strong> antes de guardarse localmente. Nunca se envían a terceros.
+          🔒 El JWT y el mdstrm.id se cifran con <strong>AES-256-GCM</strong> antes de guardarse localmente. Nunca se envían a terceros.
         </Typography>
       </Box>
 
