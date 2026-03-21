@@ -17,6 +17,7 @@ import {
   AccountInfo,
   RenditionsInfo,
   URLValidationSummary,
+  SM2Migration,
 } from '../types';
 
 const api = axios.create({
@@ -261,6 +262,26 @@ export const csvApi = {
     });
     return data;
   },
+
+  compareWithReport: async (
+    tempId: string,
+    reportFile: File,
+    idField: string
+  ): Promise<{
+    totalCurrent: number;
+    totalReport: number;
+    duplicateCount: number;
+    duplicates: string[];
+    hasMore: boolean;
+  }> => {
+    const formData = new FormData();
+    formData.append('reportFile', reportFile);
+    formData.append('idField', idField);
+    const { data } = await api.post(`/csv/temp/${tempId}/compare-report`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return data;
+  },
 };
 
 // ==================== Alerts ====================
@@ -307,7 +328,7 @@ export const settingsApi = {
     return data;
   },
 
-  getMediastreamMigrations: async (): Promise<unknown[]> => {
+  getMediastreamMigrations: async (): Promise<SM2Migration[]> => {
     const { data } = await api.get('/settings/mediastream-migrations');
     return data;
   },

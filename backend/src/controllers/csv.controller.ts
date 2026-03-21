@@ -298,6 +298,48 @@ export class CSVController {
     res.json({ results, summary });
   }
 
+  // POST /api/csv/temp/:id/compare-report — cruza IDs del CSV actual contra un reporte de migración anterior
+  static async compareWithReport(req: Request, res: Response) {
+    const { id } = req.params as { id: string };
+    const { idField } = req.body as { idField?: string };
+    const reportFile = req.file;
+
+    if (!reportFile) return res.status(400).json({ error: 'Archivo de reporte requerido' });
+    if (!idField) return res.status(400).json({ error: 'Campo ID requerido (idField)' });
+
+    const currentPath = path.join(TEMP_DIR, `${id}.csv`);
+    try {
+      await fs.access(currentPath);
+    } catch {
+      await fs.unlink(reportFile.path).catch(() => {});
+      return res.status(404).json({ error: 'Archivo CSV temporal no encontrado' });
+    }
+
+    try {
+      // Extraer IDs del CSV actual y del reporte en paralelo
+      const [currentIds, reportIds] = await Promise.all([
+        csvValidator.extractIds(currentPath, idField),
+        csvValidator.extractIds(reportFile.path, idField),
+      ]);
+
+      await fs.unlink(reportFile.path).catch(() => {});
+
+      const reportIdSet = new Set(reportIds);
+      const duplicates = currentIds.filter((id) => reportIdSet.has(id));
+
+      res.json({
+        totalCurrent: currentIds.length,
+        totalReport: reportIds.length,
+        duplicateCount: duplicates.length,
+        duplicates: duplicates.slice(0, 100), // máx 100 para no saturar la respuesta
+        hasMore: duplicates.length > 100,
+      });
+    } catch (error) {
+      await fs.unlink(reportFile.path).catch(() => {});
+      throw error;
+    }
+  }
+
   // GET /api/csv/mapper-options - Obtener opciones de mappers disponibles
   static async getMapperOptions(req: Request, res: Response) {
     const mappers = [

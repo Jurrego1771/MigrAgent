@@ -99,6 +99,7 @@ router.post('/csv/temp', upload.single('file'), CSVController.uploadTemp);
 router.post('/csv/temp/:id/normalize', CSVController.normalizeTemp);
 router.post('/csv/temp/:id/extract-urls', CSVController.extractUrlsFromTemp);
 router.post('/csv/temp/:id/validate-urls', CSVController.validateUrlsFromTemp);
+router.post('/csv/temp/:id/compare-report', upload.single('reportFile'), CSVController.compareWithReport);
 router.delete('/csv/temp/:id', CSVController.cleanupTemp);
 router.get('/csv/temp/:id/download', CSVController.downloadTemp);
 

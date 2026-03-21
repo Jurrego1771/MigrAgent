@@ -139,6 +139,19 @@ export interface Template {
   usageCount: number;
 }
 
+export interface SM2Migration {
+  _id: string;
+  name: string;
+  status: string;
+  stats?: {
+    waiting: number;
+    queued: number;
+    running: number;
+    done: number;
+    error: number;
+  };
+}
+
 export interface Migration {
   id: string;
   name: string;

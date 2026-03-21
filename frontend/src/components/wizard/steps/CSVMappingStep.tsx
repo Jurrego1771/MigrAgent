@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import {
   Box, Typography, Button, Chip, Select, MenuItem,
   FormControl, TextField, Alert, CircularProgress,
   Collapse, Divider, IconButton, Tooltip, Table,
   TableBody, TableCell, TableHead, TableRow, alpha,
+  List, ListItem, ListItemText,
 } from '@mui/material';
 import {
   CloudUpload as UploadIcon,
@@ -16,11 +17,13 @@ import {
   Download as DownloadIcon,
   ExpandMore as ExpandIcon,
   ExpandLess as CollapseIcon,
+  OpenInNew as OpenInNewIcon,
+  CompareArrows as CompareIcon,
 } from '@mui/icons-material';
 import { useDropzone } from 'react-dropzone';
-import { csvApi } from '../../../services/api';
+import { csvApi, settingsApi } from '../../../services/api';
 import { useWizard } from '../../../context/WizardContext';
-import { MappingConfig, ExtraColumn, TempCSVInfo } from '../../../types';
+import { MappingConfig, ExtraColumn, TempCSVInfo, SM2Migration } from '../../../types';
 import { COLORS } from '../../../theme';
 
 // ---------------------------------------------------------------------------
@@ -222,7 +225,7 @@ function MappingRow({ header, mapping, confidence, sampleValues, strategy, usedM
 export default function CSVMappingStep() {
   const {
     csvStep, setMappings, setExtraColumns, setCsvStep,
-    accountValidation,
+    accountValidation, session,
   } = useWizard();
   const { tempFile, mappings, extraColumns } = csvStep;
   const { migrationStrategy, suggestCategoryField } = accountValidation;
@@ -230,6 +233,19 @@ export default function CSVMappingStep() {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+
+  // Alerta de migraciones activas en SM2
+  const [sm2Migrations, setSm2Migrations] = useState<SM2Migration[]>([]);
+  const [migrationAlertDismissed, setMigrationAlertDismissed] = useState(false);
+
+  // Herramienta de comparación de reportes
+  const [compareOpen, setCompareOpen] = useState(false);
+  const [comparing, setComparing] = useState(false);
+  const [compareResult, setCompareResult] = useState<{
+    totalCurrent: number; totalReport: number;
+    duplicateCount: number; duplicates: string[]; hasMore: boolean;
+  } | null>(null);
+  const reportInputRef = useRef<HTMLInputElement>(null);
 
   // Inicializar sugerencia de category cuando llega desde paso 2
   useEffect(() => {
@@ -240,6 +256,30 @@ export default function CSVMappingStep() {
       ]);
     }
   }, [suggestCategoryField]); // eslint-disable-line
+
+  // Cargar migraciones activas de SM2 al montar
+  useEffect(() => {
+    settingsApi.getMediastreamMigrations()
+      .then((list) => setSm2Migrations(list))
+      .catch(() => {}); // silencioso — no bloquear flujo principal
+  }, []); // eslint-disable-line
+
+  const handleCompareReport = async (file: File) => {
+    if (!tempFile?.tempId) return;
+    const idMapping = mappings.find((m) => m.mapper === 'id');
+    if (!idMapping) return;
+
+    setComparing(true);
+    setCompareResult(null);
+    try {
+      const result = await csvApi.compareWithReport(tempFile.tempId, file, idMapping.field);
+      setCompareResult(result);
+    } catch {
+      // error silencioso — el usuario puede reintentar
+    } finally {
+      setComparing(false);
+    }
+  };
 
   const handleFile = async (file: File) => {
     setUploading(true);
@@ -300,6 +340,61 @@ export default function CSVMappingStep() {
           — puedes ajustar el mapeo antes de continuar.
         </Typography>
       </Box>
+
+      {/* ── Alerta migraciones activas en SM2 ── */}
+      {sm2Migrations.length > 0 && !migrationAlertDismissed && (
+        <Box
+          sx={{
+            p: 2, borderRadius: 2,
+            border: `1px solid ${alpha('#F5A623', 0.4)}`,
+            background: alpha('#F5A623', 0.06),
+            display: 'flex', gap: 1.5, alignItems: 'flex-start',
+          }}
+        >
+          <WarnIcon sx={{ color: '#F5A623', fontSize: 20, mt: 0.2, flexShrink: 0 }} />
+          <Box sx={{ flexGrow: 1 }}>
+            <Typography variant="body2" fontWeight={600} sx={{ color: '#F5A623' }}>
+              Tienes {sm2Migrations.length} migración{sm2Migrations.length > 1 ? 'es' : ''} anterior{sm2Migrations.length > 1 ? 'es' : ''} en SM2
+            </Typography>
+            <Typography variant="caption" color="text.secondary" display="block" mt={0.3}>
+              Si tu CSV contiene IDs que ya fueron migrados, SM2 los rechazará con error de duplicado.
+              Revisa tus migraciones antes de continuar.
+            </Typography>
+            <Box sx={{ display: 'flex', gap: 1, mt: 1, flexWrap: 'wrap' }}>
+              {sm2Migrations.slice(0, 3).map((m) => (
+                <Chip
+                  key={m._id}
+                  label={`${m.name}${m.stats ? ` · ${m.stats.done} ok / ${m.stats.error} err` : ''}`}
+                  size="small"
+                  sx={{ fontSize: '0.7rem', background: alpha('#F5A623', 0.12), color: '#F5A623' }}
+                />
+              ))}
+              {sm2Migrations.length > 3 && (
+                <Chip label={`+${sm2Migrations.length - 3} más`} size="small" sx={{ fontSize: '0.7rem' }} />
+              )}
+            </Box>
+          </Box>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, flexShrink: 0 }}>
+            <Button
+              size="small"
+              endIcon={<OpenInNewIcon fontSize="small" />}
+              href={`${session?.apiUrl ?? 'https://platform.mediastre.am'}/settings/migration`}
+              target="_blank"
+              sx={{ fontSize: '0.72rem', color: '#F5A623', borderColor: alpha('#F5A623', 0.4) }}
+              variant="outlined"
+            >
+              Ver en SM2
+            </Button>
+            <Button
+              size="small"
+              onClick={() => setMigrationAlertDismissed(true)}
+              sx={{ fontSize: '0.72rem', color: 'text.disabled' }}
+            >
+              Ignorar
+            </Button>
+          </Box>
+        </Box>
+      )}
 
       {/* Dropzone o info del archivo */}
       {!tempFile ? (
@@ -442,6 +537,86 @@ export default function CSVMappingStep() {
               </Button>
               <Collapse in={showPreview}>
                 <PreviewTable preview={tempFile.preview} mappings={mappings} />
+              </Collapse>
+            </Box>
+          )}
+
+          {/* ── Herramienta de comparación de reportes ── */}
+          {mappings.find((m) => m.mapper === 'id') && (
+            <Box
+              sx={{
+                border: `1px solid ${alpha(COLORS.darkBorder, 0.6)}`,
+                borderRadius: 2, overflow: 'hidden',
+              }}
+            >
+              <Box
+                sx={{
+                  px: 2, py: 1.25,
+                  background: alpha(COLORS.charcoal, 0.15),
+                  display: 'flex', alignItems: 'center', gap: 1,
+                  cursor: 'pointer', userSelect: 'none',
+                }}
+                onClick={() => { setCompareOpen((v) => !v); setCompareResult(null); }}
+              >
+                <CompareIcon sx={{ fontSize: 18, color: 'text.disabled' }} />
+                <Typography variant="caption" fontWeight={600} color="text.secondary" sx={{ flexGrow: 1 }}>
+                  Comparar con reporte de migración anterior
+                </Typography>
+                {compareOpen ? <CollapseIcon sx={{ fontSize: 18, color: 'text.disabled' }} /> : <ExpandIcon sx={{ fontSize: 18, color: 'text.disabled' }} />}
+              </Box>
+              <Collapse in={compareOpen}>
+                <Box sx={{ p: 2, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                  <Typography variant="caption" color="text.secondary">
+                    Sube el reporte CSV descargado desde SM2 para detectar IDs que ya fueron migrados y
+                    podrían fallar si los incluyes nuevamente.
+                  </Typography>
+                  <input
+                    ref={reportInputRef}
+                    type="file"
+                    accept=".csv"
+                    style={{ display: 'none' }}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) handleCompareReport(f);
+                      e.target.value = '';
+                    }}
+                  />
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    startIcon={comparing ? <CircularProgress size={14} /> : <CompareIcon />}
+                    disabled={comparing}
+                    onClick={() => reportInputRef.current?.click()}
+                    sx={{ alignSelf: 'flex-start', borderColor: alpha(COLORS.darkBorder, 0.6), color: 'text.secondary' }}
+                  >
+                    {comparing ? 'Comparando…' : 'Subir reporte y comparar'}
+                  </Button>
+                  {compareResult && (
+                    <Box>
+                      {compareResult.duplicateCount === 0 ? (
+                        <Alert severity="success" sx={{ fontSize: '0.82rem' }}>
+                          Sin duplicados — ningún ID del CSV actual aparece en el reporte anterior.
+                        </Alert>
+                      ) : (
+                        <Alert severity="warning" sx={{ fontSize: '0.82rem' }}>
+                          <strong>{compareResult.duplicateCount} IDs duplicados</strong> de {compareResult.totalCurrent} en tu CSV
+                          ya existen en el reporte ({compareResult.totalReport} filas). SM2 los rechazará al intentar migrarlos.
+                          {compareResult.hasMore && ' Se muestran los primeros 100.'}
+                          <List dense disablePadding sx={{ mt: 1, maxHeight: 140, overflow: 'auto' }}>
+                            {compareResult.duplicates.map((id) => (
+                              <ListItem key={id} disablePadding>
+                                <ListItemText
+                                  primary={id}
+                                  primaryTypographyProps={{ variant: 'caption', fontFamily: 'monospace' }}
+                                />
+                              </ListItem>
+                            ))}
+                          </List>
+                        </Alert>
+                      )}
+                    </Box>
+                  )}
+                </Box>
               </Collapse>
             </Box>
           )}

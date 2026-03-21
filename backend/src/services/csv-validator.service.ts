@@ -504,6 +504,24 @@ export class CSVValidatorService {
     });
   }
 
+  /**
+   * Extrae todos los valores del campo mapeado como 'id' de un CSV.
+   * Usado para comparar contra reportes de migraciones anteriores.
+   */
+  async extractIds(filePath: string, idField: string): Promise<string[]> {
+    return new Promise((resolve, reject) => {
+      const ids: string[] = [];
+      createReadStream(filePath)
+        .pipe(parse({ columns: true, skip_empty_lines: true, trim: true }))
+        .on('data', (row: Record<string, string>) => {
+          const val = row[idField]?.trim();
+          if (val) ids.push(val);
+        })
+        .on('end', () => resolve(ids))
+        .on('error', reject);
+    });
+  }
+
   async extractUrls(filePath: string, mappings: MappingConfig[]): Promise<string[]> {
     const urlMappers = ['original', 'rendition', 'thumb'];
     const urlFields = mappings
