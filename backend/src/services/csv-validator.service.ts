@@ -13,15 +13,19 @@ import {
   CSVPreviewRow,
   MappingConfig,
   MAPPER_PATTERNS,
+  TransformationRule,
 } from '../types/index.js';
+import { TransformationEngine } from './transformation-engine.service.js';
 import { URLValidatorService } from './url-validator.service.js';
 import { config } from '../config/index.js';
 
 export class CSVValidatorService {
   private urlValidator: URLValidatorService;
+  private transformEngine: TransformationEngine;
 
   constructor() {
     this.urlValidator = new URLValidatorService();
+    this.transformEngine = new TransformationEngine();
   }
 
   async validateCSV(
@@ -442,8 +446,11 @@ export class CSVValidatorService {
   async normalizeCSV(
     inputPath: string,
     outputPath: string,
-    extraColumns: { name: string; defaultValue: string }[] = []
-  ): Promise<{ rowCount: number; addedColumns: string[] }> {
+    extraColumns: { name: string; defaultValue: string }[] = [],
+    transformationRules: TransformationRule[] = [],
+    skipIds: Set<string> = new Set(),
+    idColumn?: string
+  ): Promise<{ rowCount: number; addedColumns: string[]; skippedCount: number }> {
     const rows: Record<string, string>[] = [];
 
     await new Promise<void>((resolve, reject) => {
@@ -455,20 +462,37 @@ export class CSVValidatorService {
       parser.on('end', resolve);
     });
 
-    if (rows.length === 0) return { rowCount: 0, addedColumns: [] };
+    if (rows.length === 0) return { rowCount: 0, addedColumns: [], skippedCount: 0 };
 
     const addedColumns = extraColumns.map((c) => c.name);
     const headers = [...Object.keys(rows[0]), ...addedColumns];
 
-    const normalizedRows = rows.map((row) => {
+    let skippedCount = 0;
+    const normalizedRows = rows.flatMap((row) => {
+      // Filtrar IDs ya migrados si se solicitó
+      if (skipIds.size > 0 && idColumn) {
+        const rowId = row[idColumn]?.trim();
+        if (rowId && skipIds.has(rowId)) {
+          skippedCount++;
+          return [];
+        }
+      }
+
+      // 1. trim básico
       const normalized: Record<string, string> = {};
       for (const [k, v] of Object.entries(row)) {
         normalized[k] = typeof v === 'string' ? v.trim() : v;
       }
+      // 2. columnas extra
       for (const extra of extraColumns) {
         normalized[extra.name] = extra.defaultValue;
       }
-      return normalized;
+      // 3. reglas de transformación
+      return [
+        transformationRules.length > 0
+          ? this.transformEngine.applyRules(normalized, transformationRules)
+          : normalized,
+      ];
     });
 
     await pipeline(
@@ -482,7 +506,34 @@ export class CSVValidatorService {
       createWriteStream(outputPath)
     );
 
-    return { rowCount: rows.length, addedColumns };
+    return { rowCount: normalizedRows.length, addedColumns, skippedCount };
+  }
+
+  /**
+   * Parsea un CSV de reporte SM2 y extrae los IDs de items con migrationStatus === 'done'.
+   * Columna de ID: 'ID of video in your CMS'
+   */
+  async parseReportIds(filePath: string): Promise<{ ids: string[]; totalRows: number; doneCount: number }> {
+    const ID_COL = 'ID of video in your CMS';
+    const STATUS_COL = 'migrationStatus';
+    const ids: string[] = [];
+    let totalRows = 0;
+
+    await new Promise<void>((resolve, reject) => {
+      createReadStream(filePath)
+        .pipe(parse({ columns: true, skip_empty_lines: true, trim: true }))
+        .on('data', (row: Record<string, string>) => {
+          totalRows++;
+          if (row[STATUS_COL]?.trim().toLowerCase() === 'done') {
+            const id = row[ID_COL]?.trim();
+            if (id) ids.push(id);
+          }
+        })
+        .on('end', resolve)
+        .on('error', reject);
+    });
+
+    return { ids, totalRows, doneCount: ids.length };
   }
 
   async getRowCount(filePath: string): Promise<number> {
@@ -520,6 +571,56 @@ export class CSVValidatorService {
         .on('end', () => resolve(ids))
         .on('error', reject);
     });
+  }
+
+  /**
+   * Divide un CSV en sub-archivos de `batchSize` filas cada uno.
+   * Devuelve los paths de los archivos generados en orden.
+   */
+  async splitCSV(
+    inputPath: string,
+    outputDir: string,
+    batchSize: number
+  ): Promise<{ paths: string[]; rowCounts: number[] }> {
+    const rows: Record<string, string>[] = [];
+    let headers: string[] = [];
+
+    await new Promise<void>((resolve, reject) => {
+      const parser = createReadStream(inputPath).pipe(
+        parse({ columns: true, skip_empty_lines: true, trim: true, relax_column_count: true })
+      );
+      parser.on('data', (row: Record<string, string>) => {
+        if (headers.length === 0) headers = Object.keys(row);
+        rows.push(row);
+      });
+      parser.on('error', reject);
+      parser.on('end', resolve);
+    });
+
+    const paths: string[] = [];
+    const rowCounts: number[] = [];
+    const totalBatches = Math.ceil(rows.length / batchSize);
+
+    for (let i = 0; i < totalBatches; i++) {
+      const batchRows = rows.slice(i * batchSize, (i + 1) * batchSize);
+      const outPath = path.join(outputDir, `batch-${i + 1}-of-${totalBatches}-${Date.now()}.csv`);
+
+      await pipeline(
+        (async function* () {
+          yield headers;
+          for (const row of batchRows) {
+            yield headers.map((h) => row[h] ?? '');
+          }
+        })(),
+        stringify(),
+        createWriteStream(outPath)
+      );
+
+      paths.push(outPath);
+      rowCounts.push(batchRows.length);
+    }
+
+    return { paths, rowCounts };
   }
 
   async extractUrls(filePath: string, mappings: MappingConfig[]): Promise<string[]> {

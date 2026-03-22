@@ -123,6 +123,13 @@ export class MigrationController {
     res.json({ success: true });
   }
 
+  // POST /api/migrations/:id/resume
+  static async resume(req: Request, res: Response) {
+    const { id } = req.params;
+    const result = await migrationService.resume(id);
+    res.json({ success: true, fromRow: result.fromRow });
+  }
+
   // GET /api/migrations/:id/stats
   static async getStats(req: Request, res: Response) {
     const { id } = req.params;
@@ -147,5 +154,30 @@ export class MigrationController {
     });
 
     res.json(logs);
+  }
+
+  // GET /api/migrations/:id/stats-history
+  static async getStatsHistory(req: Request, res: Response) {
+    const { id } = req.params as { id: string };
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 200;
+    const history = await migrationService.getStatsHistory(id, limit);
+    res.json(history);
+  }
+
+  // GET /api/migrations/:id/report/csv
+  static async downloadReport(req: Request, res: Response) {
+    const { id } = req.params as { id: string };
+    const migration = await migrationService.getById(id);
+
+    if (!migration) {
+      return res.status(404).json({ error: 'Migración no encontrada' });
+    }
+
+    const csv = await migrationService.generateReportCSV(id);
+    const filename = `reporte-${migration.name.replace(/[^a-z0-9]/gi, '_')}-${new Date().toISOString().slice(0, 10)}.csv`;
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send('\uFEFF' + csv); // BOM para compatibilidad con Excel
   }
 }

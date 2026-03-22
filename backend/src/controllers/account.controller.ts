@@ -57,6 +57,20 @@ export class AccountController {
       drm: !!(modules?.drm),
     };
 
+    // Extract AI settings from account.ai and ops.ai
+    const aiConfig = (account?.ai as Record<string, unknown>) || {};
+    const opsAi = ((accountData as Record<string, unknown>)?.ops as Record<string, unknown>)?.ai as Record<string, unknown> || {};
+    const AI_FEATURES = ['transcription', 'metadata', 'chapters', 'highlights', 'article', 'i18n', 'thumbnails'] as const;
+    const aiSettings: Record<string, { enabled: boolean; automatic: boolean; model?: string }> = {};
+    for (const feature of AI_FEATURES) {
+      const cfg = (aiConfig[feature] as Record<string, unknown>) || {};
+      aiSettings[feature] = {
+        enabled: opsAi[feature] === true,
+        automatic: cfg.automatic === true,
+        model: cfg.model as string | undefined,
+      };
+    }
+
     res.json({
       account: {
         id: accountData && (accountData as Record<string, unknown>).account
@@ -72,6 +86,7 @@ export class AccountController {
       },
       modules,
       moduleChecks,
+      aiSettings,
     });
   }
 
@@ -106,5 +121,15 @@ export class AccountController {
     const service = await MediastreamService.fromActiveSession();
     const categories = await service.getCategories(search);
     res.json({ categories });
+  }
+
+  /**
+   * GET /api/account/ia-settings
+   * Probe de los settings de IA de SM2 — descubre qué devuelve el endpoint.
+   */
+  static async getIASettings(req: Request, res: Response): Promise<void> {
+    const service = await MediastreamService.fromActiveSession();
+    const result = await service.getAISettings();
+    res.json(result);
   }
 }

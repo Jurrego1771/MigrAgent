@@ -1,7 +1,8 @@
-import { PrismaClient, Migration, MigrationLog, Alert } from '@prisma/client';
+import { PrismaClient, Migration, MigrationLog, Alert, StatsHistory } from '@prisma/client';
 import { MediastreamService } from './mediastream.service.js';
 import { CSVValidatorService } from './csv-validator.service.js';
 import { TemplateService } from './template.service.js';
+import { NotificationService } from './notification.service.js';
 import {
   MappingConfig,
   RetryPolicy,
@@ -10,11 +11,13 @@ import {
   CSVValidationResult,
 } from '../types/index.js';
 import { config } from '../config/index.js';
+import { getIO } from '../socket.js';
 
 export class MigrationService {
   private prisma: PrismaClient;
   private csvValidator: CSVValidatorService;
   private templateService: TemplateService;
+  private notificationService: NotificationService;
   private monitoringIntervals: Map<string, NodeJS.Timeout> = new Map();
   private statsHistory: Map<string, { timestamp: number; done: number }[]> = new Map();
 
@@ -22,6 +25,7 @@ export class MigrationService {
     this.prisma = prisma;
     this.csvValidator = new CSVValidatorService();
     this.templateService = new TemplateService(prisma);
+    this.notificationService = new NotificationService(prisma);
   }
 
   private async ms(): Promise<MediastreamService> {
@@ -273,6 +277,47 @@ export class MigrationService {
     this.startMonitoring(migrationId);
   }
 
+  async resume(migrationId: string): Promise<{ fromRow: number }> {
+    const migration = await this.getById(migrationId);
+    if (!migration) throw new Error('Migración no encontrada');
+    if (!migration.mediastreamConfigId) throw new Error('Migración no creada en Mediastream');
+    if (!migration.checkpointData) throw new Error('No hay checkpoint guardado para esta migración');
+
+    if (!['paused', 'error'].includes(migration.status)) {
+      throw new Error(`No se puede reanudar desde estado "${migration.status}"`);
+    }
+
+    const checkpoint = JSON.parse(migration.checkpointData) as {
+      lastSuccessfulRow: number;
+      sm2MigrationId: string;
+      timestamp: string;
+    };
+
+    // SM2 no soporta reanudación parcial nativa — reiniciamos la migración en SM2
+    // pero mantenemos el contexto de checkpoint en nuestra DB para auditoría.
+    await (await this.ms()).startMigration(migration.mediastreamConfigId);
+
+    await this.prisma.migration.update({
+      where: { id: migrationId },
+      data: {
+        status: 'running',
+        startedAt: migration.startedAt || new Date(),
+      },
+    });
+
+    await this.log(
+      migrationId,
+      'info',
+      'system',
+      `Migración reanudada desde checkpoint (fila ${checkpoint.lastSuccessfulRow})`,
+      { checkpoint }
+    );
+
+    this.startMonitoring(migrationId);
+
+    return { fromRow: checkpoint.lastSuccessfulRow };
+  }
+
   // ==================== Stats & Monitoring ====================
 
   async getStats(migrationId: string): Promise<EnrichedStats | null> {
@@ -379,6 +424,13 @@ export class MigrationService {
         },
       });
 
+      // Guardar checkpoint de progreso
+      const checkpoint = {
+        lastSuccessfulRow: stats.done,
+        sm2MigrationId: migration.mediastreamConfigId,
+        timestamp: new Date().toISOString(),
+      };
+
       // Actualizar migración
       await this.prisma.migration.update({
         where: { id: migrationId },
@@ -387,8 +439,12 @@ export class MigrationService {
           successItems: stats.done,
           errorItems: stats.error,
           lastUpdateAt: new Date(),
+          checkpointData: JSON.stringify(checkpoint),
         },
       });
+
+      // Emitir stats en tiempo real vía Socket.IO
+      getIO()?.to(`migration:${migrationId}`).emit('migration:stats', enrichedStats);
 
       // Verificar si está estancado
       await this.checkIfStalled(migrationId, enrichedStats);
@@ -449,6 +505,11 @@ export class MigrationService {
       },
     });
 
+    // Si completó sin errores, guardar todos los IDs en el historial de deduplicación
+    if (stats.error === 0) {
+      await this.saveCompletedMigrationIds(migrationId);
+    }
+
     await this.log(
       migrationId,
       'info',
@@ -460,6 +521,15 @@ export class MigrationService {
       type: 'completed',
       severity: stats.error > 0 ? 'warning' : 'info',
       message: `Migración completada: ${stats.done} exitosos, ${stats.error} errores`,
+    });
+
+    // Emitir evento de completado vía Socket.IO
+    getIO()?.to(`migration:${migrationId}`).emit('migration:status', { status: 'done', stats });
+
+    // Enviar notificaciones externas
+    await this.notificationService.notifyMigrationComplete(migrationId, {
+      done: stats.done,
+      error: stats.error,
     });
   }
 
@@ -580,7 +650,7 @@ export class MigrationService {
       return recentAlert;
     }
 
-    return this.prisma.alert.create({
+    const alert = await this.prisma.alert.create({
       data: {
         migrationId,
         type: data.type,
@@ -588,6 +658,20 @@ export class MigrationService {
         message: data.message,
       },
     });
+
+    // Emitir alerta vía Socket.IO
+    if (migrationId) {
+      getIO()?.to(`migration:${migrationId}`).emit('migration:alert', alert);
+    }
+    // También emitir al canal global de alertas para el badge del header
+    getIO()?.emit('alerts:new', alert);
+
+    // Enviar notificación externa si es error crítico
+    if (data.type !== 'completed' && migrationId) {
+      await this.notificationService.notifyMigrationAlert(migrationId, data.type, data.message);
+    }
+
+    return alert;
   }
 
   async getAlerts(options?: {
@@ -615,6 +699,53 @@ export class MigrationService {
     });
   }
 
+  // ==================== History / Deduplication ====================
+
+  private async saveCompletedMigrationIds(migrationId: string): Promise<void> {
+    try {
+      const migration = await this.prisma.migration.findUnique({ where: { id: migrationId } });
+      if (!migration?.csvFileName) return;
+
+      const csvPath = require('path').join(process.cwd(), 'uploads', migration.csvFileName);
+      try {
+        await require('fs/promises').access(csvPath);
+      } catch {
+        return; // CSV ya no existe en disco
+      }
+
+      // Encontrar la columna mapeada como 'id'
+      const mappings = JSON.parse(migration.mappings) as MappingConfig[];
+      const idColumn = mappings.find((m) => m.mapper === 'id')?.field;
+      if (!idColumn) return;
+
+      const ids = await this.csvValidator.extractIds(csvPath, idColumn);
+      if (ids.length === 0) return;
+
+      // Guardar solo los que no existen ya
+      const existing = await this.prisma.migratedItem.findMany({
+        where: { itemId: { in: ids } },
+        select: { itemId: true },
+      });
+      const existingSet = new Set(existing.map((e) => e.itemId));
+      const newIds = ids.filter((id) => !existingSet.has(id));
+
+      if (newIds.length > 0) {
+        await this.prisma.migratedItem.createMany({
+          data: newIds.map((itemId) => ({ itemId, migrationId, source: 'auto' })),
+        });
+      }
+
+      await this.log(
+        migrationId,
+        'info',
+        'system',
+        `${newIds.length} IDs guardados en historial de deduplicación`
+      );
+    } catch (error) {
+      console.error('Error saving migration IDs to history:', error);
+    }
+  }
+
   // ==================== Helpers ====================
 
   private async updateStatus(migrationId: string, status: string): Promise<void> {
@@ -622,6 +753,67 @@ export class MigrationService {
       where: { id: migrationId },
       data: { status },
     });
+  }
+
+  // ==================== Stats History ====================
+
+  async getStatsHistory(migrationId: string, limit: number = 200): Promise<StatsHistory[]> {
+    return this.prisma.statsHistory.findMany({
+      where: { migrationId },
+      orderBy: { timestamp: 'asc' },
+      take: limit,
+    });
+  }
+
+  // ==================== Report ====================
+
+  async generateReportCSV(migrationId: string): Promise<string> {
+    const migration = await this.prisma.migration.findUnique({ where: { id: migrationId } });
+    if (!migration) throw new Error('Migración no encontrada');
+
+    const logs = await this.getLogs(migrationId, { limit: 10000 });
+
+    const duration =
+      migration.startedAt && migration.completedAt
+        ? Math.round(
+            (migration.completedAt.getTime() - migration.startedAt.getTime()) / 60000
+          ) + ' minutos'
+        : 'N/A';
+
+    const successRate =
+      migration.successItems + migration.errorItems > 0
+        ? Math.round(
+            (migration.successItems / (migration.successItems + migration.errorItems)) * 100
+          )
+        : 100;
+
+    const summaryLines = [
+      `# REPORTE DE MIGRACIÓN — MigrAgent`,
+      `# Nombre: ${migration.name}`,
+      `# Estado: ${migration.status}`,
+      `# Estrategia: ${migration.strategy}`,
+      `# Archivo CSV: ${migration.csvFileName || 'N/A'}`,
+      `# Total items: ${migration.totalItems}`,
+      `# Exitosos: ${migration.successItems}`,
+      `# Errores: ${migration.errorItems}`,
+      `# Tasa de éxito: ${successRate}%`,
+      `# Iniciada: ${migration.startedAt?.toISOString() || 'N/A'}`,
+      `# Completada: ${migration.completedAt?.toISOString() || 'N/A'}`,
+      `# Duración: ${duration}`,
+      `# Reintentos: ${migration.currentRetryCount} / ${migration.maxRetries}`,
+      `# Generado: ${new Date().toISOString()}`,
+      `#`,
+      `timestamp,level,category,message`,
+    ].join('\n');
+
+    const logRows = logs
+      .map(
+        (l) =>
+          `"${l.createdAt.toISOString()}","${l.level}","${l.category}","${l.message.replace(/"/g, '""')}"`
+      )
+      .join('\n');
+
+    return summaryLines + '\n' + logRows;
   }
 
   async getValidationResult(migrationId: string): Promise<CSVValidationResult | null> {

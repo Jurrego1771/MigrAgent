@@ -13,9 +13,10 @@ model Template {
   name            String
   description     String?
   strategy        String   // 'transcode' | 'upload'
-  mappings        String   // JSON stringified
-  expectedHeaders String   // JSON stringified - headers esperados
-  usageCount      Int      @default(0)
+  mappings              String   // JSON stringified
+  expectedHeaders       String   // JSON stringified - headers esperados
+  transformationRules   String?  // JSON stringified TransformationRule[]
+  usageCount            Int      @default(0)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -30,9 +31,22 @@ model Migration {
   templateId          String?
   template            Template? @relation(fields: [templateId], references: [id])
   status              String   @default("created") // created, validating, validated, running, paused, done, error
-  strategy            String
-  mappings            String   // JSON stringified
-  csvFileName         String?
+  strategy              String
+  mappings              String   // JSON stringified
+  transformationRules   String?  // JSON stringified TransformationRule[]
+  csvFileName           String?
+
+  // Migración por lotes
+  batchGroupId          String?  // UUID compartido por todos los lotes del mismo proyecto
+  batchIndex            Int?     // 1-based: qué lote es este dentro del grupo
+  batchTotal            Int?     // total de lotes en el grupo
+  batchSize             Int?     // items por lote configurado
+  batchNamePrefix       String?  // prefijo usado para nombrar los lotes en SM2
+  batchMode             String?  // 'auto' | 'manual'
+
+  // Checkpoint para reanudación
+  checkpointData        String?  // JSON: { lastSuccessfulRow, lastItemId, sm2MigrationId, timestamp }
+
   totalItems          Int      @default(0)
   processedItems      Int      @default(0)
   successItems        Int      @default(0)
@@ -154,6 +168,12 @@ model Settings {
   urlCheckTimeout       Int      @default(10000) // 10 segundos
   urlCheckConcurrency   Int      @default(5)
 
+  // Notificaciones
+  notificationEmail     String?  // Email destino para notificaciones
+  notificationWebhookUrl String? // URL para webhook saliente
+  notifyOnComplete      Boolean  @default(false)
+  notifyOnError         Boolean  @default(false)
+
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 }
@@ -169,6 +189,17 @@ model MapperConfig {
   optionsSchema String? // JSON Schema para opciones
 
   createdAt   DateTime @default(now())
+}
+
+// Historial de items migrados exitosamente (para deduplicación)
+model MigratedItem {
+  id          String   @id @default(uuid())
+  itemId      String   // "ID of video in your CMS" — id original del item
+  migrationId String?  // referencia local si viene de migración interna
+  source      String   @default("report") // "report" | "auto"
+  migratedAt  DateTime @default(now())
+
+  @@index([itemId])
 }
 
 // Sesiones autenticadas con Mediastream (credenciales cifradas AES-256-GCM)

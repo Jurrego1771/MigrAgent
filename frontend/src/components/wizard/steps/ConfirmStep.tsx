@@ -7,6 +7,12 @@ import {
   alpha,
   CircularProgress,
   Divider,
+  TextField,
+  Switch,
+  FormControlLabel,
+  ToggleButtonGroup,
+  ToggleButton,
+  Collapse,
 } from '@mui/material';
 import {
   RocketLaunch as RocketIcon,
@@ -15,9 +21,12 @@ import {
   OpenInNew as OpenInNewIcon,
   Description as DescriptionIcon,
   ContentCopy as CopyIcon,
+  Splitscreen as BatchIcon,
+  BookmarkAdd as SaveTemplateIcon,
 } from '@mui/icons-material';
 import { useWizard } from '../../../context/WizardContext';
 import { wizardApi } from '../../../services/api';
+import { BatchConfig } from '../../../types';
 import { COLORS } from '../../../theme';
 
 type SubmitStatus = 'idle' | 'submitting' | 'success' | 'error';
@@ -27,12 +36,38 @@ export default function ConfirmStep() {
     useWizard();
 
   const [status, setStatus] = useState<SubmitStatus>('idle');
-  const [result, setResult] = useState<{ migrationId: string; mediastreamId: string } | null>(null);
+  const [result, setResult] = useState<{
+    migrationId: string;
+    mediastreamId: string;
+    isBatch?: boolean;
+    batchGroupId?: string;
+    totalBatches?: number;
+    batches?: Array<{ migrationId: string; mediastreamId: string; index: number; rowCount: number }>;
+  } | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   const { migrationName, migrationStrategy, contentType, hasAdvertising } = accountValidation;
-  const { tempFile, mappings, extraColumns, normalizedTempId } = csvStep;
+  const { tempFile, mappings, extraColumns, normalizedTempId, transformationRules, templateId } = csvStep;
+
+  const [batchConfig, setBatchConfig] = useState<BatchConfig>({
+    enabled: false,
+    size: 500,
+    namePrefix: migrationName,
+    mode: 'auto',
+  });
+
+  // Save as template
+  const [saveAsTemplate, setSaveAsTemplate] = useState(false);
+  const [templateName, setTemplateName] = useState(migrationName || '');
+
+  const updateBatch = (patch: Partial<BatchConfig>) =>
+    setBatchConfig((prev) => ({ ...prev, ...patch }));
+
+  const estimatedBatches =
+    batchConfig.enabled && tempFile && batchConfig.size > 0
+      ? Math.ceil(tempFile.rowCount / batchConfig.size)
+      : null;
   const urlSummary = urlValidation.summary;
 
   const canSubmit =
@@ -53,6 +88,13 @@ export default function ConfirmStep() {
         strategy: migrationStrategy,
         mappings,
         normalizedTempId,
+        templateId: templateId ?? undefined,
+        transformationRules: transformationRules.length > 0 ? transformationRules : undefined,
+        batchConfig: batchConfig.enabled ? { ...batchConfig, namePrefix: batchConfig.namePrefix || migrationName } : undefined,
+        saveAsTemplate:
+          saveAsTemplate && templateName.trim() && !templateId
+            ? { name: templateName.trim(), expectedHeaders: tempFile?.headers ?? [] }
+            : undefined,
       });
       setResult(res);
       setStatus('success');
@@ -78,109 +120,99 @@ export default function ConfirmStep() {
 
   // ── Success state ──────────────────────────────────────────────────────
   if (status === 'success' && result) {
+    const isBatch = result.isBatch && result.batches && result.batches.length > 1;
+
     return (
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-        <Box
-          sx={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: 2,
-            py: 4,
-            textAlign: 'center',
-          }}
-        >
-          <Box
-            sx={{
-              width: 72,
-              height: 72,
-              borderRadius: '50%',
-              background: alpha(COLORS.neonGreen, 0.12),
-              border: `2px solid ${alpha(COLORS.neonGreen, 0.5)}`,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
+        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, py: 3, textAlign: 'center' }}>
+          <Box sx={{
+            width: 72, height: 72, borderRadius: '50%',
+            background: alpha(COLORS.neonGreen, 0.12),
+            border: `2px solid ${alpha(COLORS.neonGreen, 0.5)}`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
             <CheckCircleIcon sx={{ fontSize: '2rem', color: COLORS.neonGreen }} />
           </Box>
           <Box>
             <Typography variant="h5" fontWeight={700} sx={{ color: COLORS.neonGreen }}>
-              ¡Migración creada!
+              {isBatch ? `¡${result.totalBatches} lotes creados!` : '¡Migración creada!'}
             </Typography>
             <Typography variant="body2" color="text.secondary" mt={0.5}>
-              La migración fue registrada en el sistema y configurada en Mediastream.
+              {isBatch
+                ? `${result.totalBatches} migraciones nombradas creadas en SM2 y registradas en el sistema.`
+                : 'La migración fue registrada en el sistema y configurada en Mediastream.'}
             </Typography>
           </Box>
         </Box>
 
-        <Box
-          sx={{
-            p: 2,
-            borderRadius: 2,
-            border: `1px solid ${alpha(COLORS.darkBorder, 0.8)}`,
-            background: alpha(COLORS.darkCard, 0.5),
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 1,
-          }}
-        >
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Typography variant="caption" color="text.disabled">
-              ID de migración (helpperMigrator)
-            </Typography>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
-                {result.migrationId}
-              </Typography>
-              <Button
-                size="small"
-                onClick={() => handleCopy(result.migrationId)}
-                sx={{ minWidth: 0, p: 0.5, color: 'text.disabled' }}
+        {/* Lotes */}
+        {isBatch && result.batches ? (
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            {result.batches.map((b) => (
+              <Box
+                key={b.migrationId}
+                sx={{
+                  p: 1.5, borderRadius: 2,
+                  border: `1px solid ${alpha(COLORS.darkBorder, 0.8)}`,
+                  background: alpha(COLORS.darkCard, 0.5),
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                }}
               >
-                <CopyIcon sx={{ fontSize: '0.85rem' }} />
-              </Button>
-            </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                  <Chip
+                    label={`Lote ${b.index}/${result.totalBatches}`}
+                    size="small"
+                    sx={{ height: 20, fontSize: '0.68rem', bgcolor: alpha(COLORS.neonGreen, 0.12), color: COLORS.neonGreen }}
+                  />
+                  <Typography variant="caption" color="text.secondary">
+                    {b.rowCount.toLocaleString()} items
+                  </Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Typography variant="caption" sx={{ fontFamily: 'monospace', fontSize: '0.72rem', color: 'text.disabled' }}>
+                    {b.migrationId.slice(0, 8)}…
+                  </Typography>
+                  <Button
+                    size="small"
+                    href={`/migrations/${b.migrationId}`}
+                    endIcon={<OpenInNewIcon sx={{ fontSize: '0.75rem' }} />}
+                    sx={{ fontSize: '0.72rem', color: 'text.secondary', minWidth: 0, px: 1 }}
+                  >
+                    Ver
+                  </Button>
+                </Box>
+              </Box>
+            ))}
           </Box>
-          <Divider sx={{ borderColor: alpha(COLORS.darkBorder, 0.5) }} />
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Typography variant="caption" color="text.disabled">
-              ID en Mediastream (SM2)
-            </Typography>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
-                {result.mediastreamId}
-              </Typography>
-              <Button
-                size="small"
-                onClick={() => handleCopy(result.mediastreamId)}
-                sx={{ minWidth: 0, p: 0.5, color: 'text.disabled' }}
-              >
-                <CopyIcon sx={{ fontSize: '0.85rem' }} />
-              </Button>
-            </Box>
+        ) : (
+          /* Migración simple */
+          <Box sx={{ p: 2, borderRadius: 2, border: `1px solid ${alpha(COLORS.darkBorder, 0.8)}`, background: alpha(COLORS.darkCard, 0.5), display: 'flex', flexDirection: 'column', gap: 1 }}>
+            {[
+              { label: 'ID (helpperMigrator)', value: result.migrationId },
+              { label: 'ID en Mediastream (SM2)', value: result.mediastreamId },
+            ].map(({ label, value }) => (
+              <Box key={label}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Typography variant="caption" color="text.disabled">{label}</Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{value}</Typography>
+                    <Button size="small" onClick={() => handleCopy(value)} sx={{ minWidth: 0, p: 0.5, color: 'text.disabled' }}>
+                      <CopyIcon sx={{ fontSize: '0.85rem' }} />
+                    </Button>
+                  </Box>
+                </Box>
+                <Divider sx={{ borderColor: alpha(COLORS.darkBorder, 0.5), mt: 0.75 }} />
+              </Box>
+            ))}
+            {copied && <Typography variant="caption" sx={{ color: COLORS.neonGreen, textAlign: 'right' }}>✓ Copiado</Typography>}
           </Box>
-          {copied && (
-            <Typography variant="caption" sx={{ color: COLORS.neonGreen, textAlign: 'right' }}>
-              ✓ Copiado
-            </Typography>
-          )}
-        </Box>
+        )}
 
         <Box sx={{ display: 'flex', gap: 2 }}>
-          <Button
-            variant="contained"
-            href={`/migrations/${result.migrationId}`}
-            endIcon={<OpenInNewIcon />}
-            sx={{ fontWeight: 700, flex: 1 }}
-          >
-            Ver migración
+          <Button variant="contained" href={`/migrations/${result.migrationId}`} endIcon={<OpenInNewIcon />} sx={{ fontWeight: 700, flex: 1 }}>
+            {isBatch ? 'Ver lote 1' : 'Ver migración'}
           </Button>
-          <Button
-            variant="outlined"
-            href="/migrations"
-            sx={{ color: 'text.secondary', borderColor: alpha(COLORS.darkBorder, 0.8) }}
-          >
+          <Button variant="outlined" href="/migrations" sx={{ color: 'text.secondary', borderColor: alpha(COLORS.darkBorder, 0.8) }}>
             Ir a lista
           </Button>
         </Box>
@@ -254,6 +286,9 @@ export default function ConfirmStep() {
             label: 'Cuenta',
             value: session?.accountName ?? session?.accountId ?? '—',
           },
+          ...(batchConfig.enabled && estimatedBatches ? [
+            { label: 'Lotes', value: `${estimatedBatches} × ${batchConfig.size} items (${batchConfig.mode === 'manual' ? 'piloto' : 'automático'})` },
+          ] : []),
         ].map(({ label, value }) => (
           <Box
             key={label}
@@ -357,6 +392,180 @@ export default function ConfirmStep() {
         ))}
       </Box>
 
+      {/* ── Configuración de lotes ── */}
+      <Box
+        sx={{
+          borderRadius: 2,
+          border: `1px solid ${alpha(batchConfig.enabled ? COLORS.neonGreen : COLORS.charcoal, batchConfig.enabled ? 0.3 : 0.5)}`,
+          overflow: 'hidden',
+        }}
+      >
+        <Box
+          sx={{
+            px: 2, py: 1.5,
+            background: alpha(batchConfig.enabled ? COLORS.neonGreen : COLORS.charcoal, 0.08),
+            display: 'flex', alignItems: 'center', gap: 1.5,
+          }}
+        >
+          <BatchIcon sx={{ fontSize: 18, color: batchConfig.enabled ? COLORS.neonGreen : 'text.disabled' }} />
+          <Typography variant="caption" fontWeight={700} sx={{ textTransform: 'uppercase', letterSpacing: '0.08em', color: batchConfig.enabled ? COLORS.neonGreen : 'text.disabled', flexGrow: 1 }}>
+            Migración por lotes
+          </Typography>
+          <FormControlLabel
+            control={
+              <Switch
+                size="small"
+                checked={batchConfig.enabled}
+                onChange={(e) => updateBatch({ enabled: e.target.checked, namePrefix: batchConfig.namePrefix || migrationName })}
+                sx={{ '& .MuiSwitch-thumb': { bgcolor: batchConfig.enabled ? COLORS.neonGreen : undefined } }}
+              />
+            }
+            label=""
+            sx={{ m: 0 }}
+          />
+        </Box>
+
+        <Collapse in={batchConfig.enabled}>
+          <Box sx={{ p: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Typography variant="caption" color="text.secondary">
+              El CSV se dividirá en lotes. Cada lote se crea como una migración independiente y nombrada en SM2,
+              lo que permite validar con un piloto antes de comprometer toda la transcodificación.
+            </Typography>
+
+            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1.5 }}>
+              <TextField
+                label="Items por lote"
+                type="number"
+                size="small"
+                value={batchConfig.size}
+                onChange={(e) => updateBatch({ size: Math.max(1, parseInt(e.target.value) || 500) })}
+                inputProps={{ min: 1, style: { fontSize: '0.82rem' } }}
+                helperText={
+                  estimatedBatches
+                    ? `→ ${estimatedBatches} lote${estimatedBatches !== 1 ? 's' : ''} de ${batchConfig.size} items`
+                    : 'Filas por migración SM2'
+                }
+              />
+              <TextField
+                label="Prefijo de nombre"
+                size="small"
+                value={batchConfig.namePrefix}
+                onChange={(e) => updateBatch({ namePrefix: e.target.value })}
+                inputProps={{ style: { fontSize: '0.82rem' } }}
+                helperText={`Ej: "${batchConfig.namePrefix || migrationName} - Lote 1/${estimatedBatches ?? 'N'}"`}
+              />
+            </Box>
+
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+              <Typography variant="caption" color="text.secondary">Modo de ejecución</Typography>
+              <ToggleButtonGroup
+                value={batchConfig.mode}
+                exclusive
+                onChange={(_, v) => v && updateBatch({ mode: v })}
+                size="small"
+                sx={{
+                  '& .MuiToggleButton-root': {
+                    border: `1px solid ${alpha(COLORS.charcoal, 0.7)}`,
+                    color: 'text.secondary',
+                    px: 2, py: 0.75,
+                    flexDirection: 'column',
+                    alignItems: 'flex-start',
+                    gap: 0.15,
+                    '&.Mui-selected': {
+                      bgcolor: alpha(COLORS.neonGreen, 0.1),
+                      borderColor: alpha(COLORS.neonGreen, 0.4),
+                      color: COLORS.neonGreen,
+                    },
+                  },
+                }}
+              >
+                <ToggleButton value="auto">
+                  <Typography variant="caption" fontWeight={700}>Automático</Typography>
+                  <Typography variant="caption" sx={{ fontSize: '0.62rem', opacity: 0.7 }}>Crea todos los lotes de una vez</Typography>
+                </ToggleButton>
+                <ToggleButton value="manual">
+                  <Typography variant="caption" fontWeight={700}>Piloto (manual)</Typography>
+                  <Typography variant="caption" sx={{ fontSize: '0.62rem', opacity: 0.7 }}>Confirmar lote a lote</Typography>
+                </ToggleButton>
+              </ToggleButtonGroup>
+            </Box>
+
+            {estimatedBatches && (
+              <Box sx={{ p: 1.5, borderRadius: 1.5, background: alpha(COLORS.neonGreen, 0.06), border: `1px solid ${alpha(COLORS.neonGreen, 0.2)}` }}>
+                <Typography variant="caption" sx={{ color: COLORS.neonGreen }}>
+                  Se crearán <strong>{estimatedBatches} migraciones</strong> en SM2:
+                  &ldquo;{batchConfig.namePrefix || migrationName} - Lote 1/{estimatedBatches}&rdquo; … &ldquo;Lote {estimatedBatches}/{estimatedBatches}&rdquo;
+                </Typography>
+              </Box>
+            )}
+          </Box>
+        </Collapse>
+      </Box>
+
+      {/* ── Guardar como template ── */}
+      {!templateId && (
+        <Box
+          sx={{
+            borderRadius: 2,
+            border: `1px solid ${alpha(saveAsTemplate ? COLORS.sageGreen : COLORS.charcoal, saveAsTemplate ? 0.4 : 0.5)}`,
+            overflow: 'hidden',
+          }}
+        >
+          <Box
+            sx={{
+              px: 2, py: 1.5,
+              background: alpha(saveAsTemplate ? COLORS.sageGreen : COLORS.charcoal, 0.08),
+              display: 'flex', alignItems: 'center', gap: 1.5,
+            }}
+          >
+            <SaveTemplateIcon sx={{ fontSize: 18, color: saveAsTemplate ? COLORS.sageGreen : 'text.disabled' }} />
+            <Typography variant="caption" fontWeight={700} sx={{ textTransform: 'uppercase', letterSpacing: '0.08em', color: saveAsTemplate ? COLORS.sageGreen : 'text.disabled', flexGrow: 1 }}>
+              Guardar configuración como template
+            </Typography>
+            <FormControlLabel
+              control={
+                <Switch
+                  size="small"
+                  checked={saveAsTemplate}
+                  onChange={(e) => {
+                    setSaveAsTemplate(e.target.checked);
+                    if (e.target.checked && !templateName.trim()) setTemplateName(migrationName || '');
+                  }}
+                  sx={{ '& .MuiSwitch-thumb': { bgcolor: saveAsTemplate ? COLORS.sageGreen : undefined } }}
+                />
+              }
+              label=""
+              sx={{ m: 0 }}
+            />
+          </Box>
+          <Collapse in={saveAsTemplate}>
+            <Box sx={{ p: 2 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
+                El mapeo de campos se guardará como template reutilizable. La próxima vez que cargues
+                un CSV con headers similares, se detectará automáticamente.
+              </Typography>
+              <TextField
+                label="Nombre del template"
+                size="small"
+                fullWidth
+                value={templateName}
+                onChange={(e) => setTemplateName(e.target.value)}
+                inputProps={{ style: { fontSize: '0.82rem' } }}
+                helperText={`${mappings.length} campos mapeados · ${tempFile?.headers?.length ?? 0} headers`}
+              />
+            </Box>
+          </Collapse>
+        </Box>
+      )}
+      {templateId && (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 1 }}>
+          <SaveTemplateIcon sx={{ fontSize: 15, color: COLORS.sageGreen }} />
+          <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.72rem' }}>
+            Se actualizará el contador de uso del template aplicado
+          </Typography>
+        </Box>
+      )}
+
       {/* Submit button */}
       <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
         {!canSubmit && status === 'idle' && (
@@ -394,7 +603,11 @@ export default function ConfirmStep() {
               },
             }}
           >
-            {status === 'submitting' ? 'Creando migración…' : 'Crear migración en SM2'}
+            {status === 'submitting'
+            ? (batchConfig.enabled ? `Creando ${estimatedBatches ?? ''} lotes…` : 'Creando migración…')
+            : batchConfig.enabled
+            ? `Crear ${estimatedBatches ?? ''} lotes en SM2`
+            : 'Crear migración en SM2'}
           </Button>
         )}
       </Box>

@@ -166,6 +166,39 @@ export const MAPPER_PATTERNS: Record<string, RegExp[]> = {
   rendition: [/^rendition$/i, /^mp4$/i, /^hls$/i, /^dash$/i],
 };
 
+// Tipos para migración por lotes
+export interface BatchConfig {
+  enabled: boolean;
+  size: number;           // items por lote
+  namePrefix: string;     // prefijo para nombres en SM2
+  mode: 'auto' | 'manual'; // auto = crear todos, manual = uno a uno con confirmación
+}
+
+// Tipos para reglas de transformación
+export type TransformationRuleType =
+  | 'replace'       // reemplazar texto
+  | 'prefix'        // agregar prefijo
+  | 'suffix'        // agregar sufijo
+  | 'uppercase'     // convertir a mayúsculas
+  | 'lowercase'     // convertir a minúsculas
+  | 'trim'          // recortar espacios
+  | 'regex'         // reemplazar con regex
+  | 'map_value'     // mapear valor A → B
+  | 'default'       // valor por defecto si está vacío
+  | 'truncate';     // truncar a N caracteres
+
+export interface TransformationRule {
+  id: string;
+  field: string;               // campo CSV al que aplica
+  type: TransformationRuleType;
+  // Parámetros según tipo
+  find?: string;               // replace, regex
+  replace?: string;            // replace, regex
+  value?: string;              // prefix, suffix, default, truncate (as string)
+  mappingTable?: Record<string, string>; // map_value
+  enabled: boolean;
+}
+
 // Tipos para WebSocket events
 export interface WSEvent {
   type: string;

@@ -19,12 +19,17 @@ import {
   ExpandLess as CollapseIcon,
   OpenInNew as OpenInNewIcon,
   CompareArrows as CompareIcon,
+  History as HistoryIcon,
+  FilterAlt as FilterIcon,
+  Bookmark as TemplateIcon,
 } from '@mui/icons-material';
 import { useDropzone } from 'react-dropzone';
-import { csvApi, settingsApi } from '../../../services/api';
+import { csvApi, settingsApi, templateApi } from '../../../services/api';
 import { useWizard } from '../../../context/WizardContext';
-import { MappingConfig, ExtraColumn, TempCSVInfo, SM2Migration } from '../../../types';
+import { MappingConfig, ExtraColumn, TempCSVInfo, SM2Migration, Template } from '../../../types';
+import Switch from '@mui/material/Switch';
 import { COLORS } from '../../../theme';
+import TransformationRulesEditor from './TransformationRulesEditor';
 
 // ---------------------------------------------------------------------------
 // Constantes
@@ -225,9 +230,9 @@ function MappingRow({ header, mapping, confidence, sampleValues, strategy, usedM
 export default function CSVMappingStep() {
   const {
     csvStep, setMappings, setExtraColumns, setCsvStep,
-    accountValidation, session,
+    setTransformationRules, setSkipHistoryDuplicates, accountValidation, session,
   } = useWizard();
-  const { tempFile, mappings, extraColumns } = csvStep;
+  const { tempFile, mappings, extraColumns, transformationRules, historyDuplicates, skipHistoryDuplicates } = csvStep;
   const { migrationStrategy, suggestCategoryField } = accountValidation;
 
   const [uploading, setUploading] = useState(false);
@@ -238,12 +243,20 @@ export default function CSVMappingStep() {
   const [sm2Migrations, setSm2Migrations] = useState<SM2Migration[]>([]);
   const [migrationAlertDismissed, setMigrationAlertDismissed] = useState(false);
 
+  // Template detectado automáticamente
+  const [detectedTemplate, setDetectedTemplate] = useState<Template | null>(null);
+  const [templateDismissed, setTemplateDismissed] = useState(false);
+
+  // Chequeo automático de historial
+  const [checkingHistory, setCheckingHistory] = useState(false);
+
   // Herramienta de comparación de reportes
   const [compareOpen, setCompareOpen] = useState(false);
   const [comparing, setComparing] = useState(false);
   const [compareResult, setCompareResult] = useState<{
     totalCurrent: number; totalReport: number;
     duplicateCount: number; duplicates: string[]; hasMore: boolean;
+    importedToHistory: number; doneInReport: number;
   } | null>(null);
   const reportInputRef = useRef<HTMLInputElement>(null);
 
@@ -263,6 +276,29 @@ export default function CSVMappingStep() {
       .then((list) => setSm2Migrations(list))
       .catch(() => {}); // silencioso — no bloquear flujo principal
   }, []); // eslint-disable-line
+
+  // Auto-chequear historial cuando se asigna la columna id
+  const idMapping = mappings.find((m) => m.mapper === 'id');
+  useEffect(() => {
+    if (!tempFile?.tempId || !idMapping?.field) {
+      setCsvStep({ historyDuplicates: null });
+      return;
+    }
+    let cancelled = false;
+    setCheckingHistory(true);
+    csvApi.checkHistory(tempFile.tempId, idMapping.field)
+      .then((result) => {
+        if (cancelled) return;
+        setCsvStep({
+          historyDuplicates: result.duplicateCount > 0
+            ? { count: result.duplicateCount, ids: result.duplicates }
+            : null,
+        });
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setCheckingHistory(false); });
+    return () => { cancelled = true; };
+  }, [tempFile?.tempId, idMapping?.field]); // eslint-disable-line
 
   const handleCompareReport = async (file: File) => {
     if (!tempFile?.tempId) return;
@@ -284,6 +320,8 @@ export default function CSVMappingStep() {
   const handleFile = async (file: File) => {
     setUploading(true);
     setUploadError(null);
+    setDetectedTemplate(null);
+    setTemplateDismissed(false);
     try {
       const info = await csvApi.uploadTemp(file);
       setCsvStep({ tempFile: info, normalizedTempId: null });
@@ -293,6 +331,13 @@ export default function CSVMappingStep() {
         .filter((d) => d.suggestedMapper)
         .map((d) => ({ mapper: d.suggestedMapper, field: d.field }));
       setMappings(autoMappings);
+
+      // Detectar template guardado que coincida con estos headers
+      templateApi.detect(info.headers)
+        .then(({ found, template }) => {
+          if (found && template) setDetectedTemplate(template);
+        })
+        .catch(() => {});
     } catch (err: any) {
       setUploadError(err?.response?.data?.error || err.message || 'Error al procesar el archivo.');
     } finally {
@@ -310,8 +355,17 @@ export default function CSVMappingStep() {
     if (tempFile?.tempId) {
       csvApi.cleanupTemp(tempFile.tempId).catch(() => {});
     }
-    setCsvStep({ tempFile: null, mappings: [], normalizedTempId: null });
+    setCsvStep({ tempFile: null, mappings: [], normalizedTempId: null, transformationRules: [], historyDuplicates: null, skipHistoryDuplicates: false });
     setMappings([]);
+    setDetectedTemplate(null);
+    setTemplateDismissed(false);
+  };
+
+  const applyTemplate = (template: Template) => {
+    setMappings(template.mappings);
+    setCsvStep({ templateId: template.id });
+    setDetectedTemplate(null);
+    setTemplateDismissed(true);
   };
 
   const usedMappers = new Set(mappings.map((m) => m.mapper));
@@ -396,6 +450,46 @@ export default function CSVMappingStep() {
         </Box>
       )}
 
+      {/* ── Template detectado ── */}
+      {detectedTemplate && !templateDismissed && tempFile && (
+        <Box
+          sx={{
+            p: 2, borderRadius: 2,
+            border: `1px solid ${alpha(COLORS.neonGreen, 0.4)}`,
+            background: alpha(COLORS.neonGreen, 0.06),
+            display: 'flex', gap: 1.5, alignItems: 'center',
+          }}
+        >
+          <TemplateIcon sx={{ color: COLORS.neonGreen, fontSize: 20, flexShrink: 0 }} />
+          <Box sx={{ flexGrow: 1 }}>
+            <Typography variant="body2" fontWeight={600} sx={{ color: COLORS.neonGreen }}>
+              Template detectado: {detectedTemplate.name}
+            </Typography>
+            <Typography variant="caption" color="text.disabled">
+              Los headers del CSV coinciden con este template guardado.
+              ¿Quieres aplicar su configuración de mapeo?
+            </Typography>
+          </Box>
+          <Box sx={{ display: 'flex', gap: 1, flexShrink: 0 }}>
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => applyTemplate(detectedTemplate)}
+              sx={{ fontSize: '0.72rem', color: COLORS.neonGreen, borderColor: alpha(COLORS.neonGreen, 0.4) }}
+            >
+              Aplicar
+            </Button>
+            <Button
+              size="small"
+              onClick={() => setTemplateDismissed(true)}
+              sx={{ fontSize: '0.72rem', color: 'text.disabled' }}
+            >
+              Ignorar
+            </Button>
+          </Box>
+        </Box>
+      )}
+
       {/* Dropzone o info del archivo */}
       {!tempFile ? (
         <Box>
@@ -445,6 +539,57 @@ export default function CSVMappingStep() {
             <Alert severity="warning" icon={<WarnIcon fontSize="small" />} sx={{ fontSize: '0.82rem' }}>
               Campos requeridos sin asignar: <strong>{missingRequired.join(', ')}</strong>
             </Alert>
+          )}
+
+          {/* ── Banner de deduplicación por historial ── */}
+          {checkingHistory && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.5 }}>
+              <CircularProgress size={14} sx={{ color: 'text.disabled' }} />
+              <Typography variant="caption" color="text.disabled">Consultando historial de migraciones…</Typography>
+            </Box>
+          )}
+          {!checkingHistory && historyDuplicates && historyDuplicates.count > 0 && (
+            <Box
+              sx={{
+                p: 2, borderRadius: 2,
+                border: `1px solid ${alpha('#9C27B0', 0.4)}`,
+                background: alpha('#9C27B0', 0.06),
+              }}
+            >
+              <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5 }}>
+                <HistoryIcon sx={{ color: '#CE93D8', fontSize: 20, mt: 0.2, flexShrink: 0 }} />
+                <Box sx={{ flexGrow: 1 }}>
+                  <Typography variant="body2" fontWeight={600} sx={{ color: '#CE93D8' }}>
+                    {historyDuplicates.count} items ya migrados en el historial
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" display="block" mt={0.3}>
+                    Estos IDs aparecen en migraciones anteriores completadas exitosamente o en reportes importados.
+                    SM2 los rechazará si los incluyes de nuevo.
+                  </Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
+                  <FilterIcon sx={{ fontSize: 16, color: skipHistoryDuplicates ? '#CE93D8' : 'text.disabled' }} />
+                  <Typography variant="caption" color={skipHistoryDuplicates ? '#CE93D8' : 'text.disabled'}>
+                    Omitir duplicados
+                  </Typography>
+                  <Switch
+                    size="small"
+                    checked={skipHistoryDuplicates}
+                    onChange={(e) => setSkipHistoryDuplicates(e.target.checked)}
+                    sx={{
+                      '& .MuiSwitch-thumb': { bgcolor: skipHistoryDuplicates ? '#9C27B0' : undefined },
+                      '& .MuiSwitch-track': { bgcolor: skipHistoryDuplicates ? alpha('#9C27B0', 0.5) : undefined },
+                    }}
+                  />
+                </Box>
+              </Box>
+              {skipHistoryDuplicates && (
+                <Typography variant="caption" sx={{ mt: 1, display: 'block', color: '#CE93D8' }}>
+                  Se omitirán <strong>{historyDuplicates.count}</strong> filas al normalizar. El CSV final tendrá{' '}
+                  <strong>{(tempFile?.rowCount ?? 0) - historyDuplicates.count}</strong> items.
+                </Typography>
+              )}
+            </Box>
           )}
 
           <Box
@@ -523,6 +668,13 @@ export default function CSVMappingStep() {
             onChange={setExtraColumns}
           />
 
+          {/* Reglas de transformación */}
+          <TransformationRulesEditor
+            rules={transformationRules}
+            csvHeaders={tempFile.headers}
+            onChange={setTransformationRules}
+          />
+
           {/* Vista previa */}
           {tempFile.preview.length > 0 && (
             <Box>
@@ -567,13 +719,13 @@ export default function CSVMappingStep() {
               <Collapse in={compareOpen}>
                 <Box sx={{ p: 2, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
                   <Typography variant="caption" color="text.secondary">
-                    Sube el reporte CSV descargado desde SM2 para detectar IDs que ya fueron migrados y
-                    podrían fallar si los incluyes nuevamente.
+                    Sube el reporte descargado desde SM2 (<strong>.zip</strong> o <strong>.csv</strong>) para detectar
+                    IDs ya migrados. Los IDs con status <em>done</em> se guardarán automáticamente en el historial.
                   </Typography>
                   <input
                     ref={reportInputRef}
                     type="file"
-                    accept=".csv"
+                    accept=".csv,.zip"
                     style={{ display: 'none' }}
                     onChange={(e) => {
                       const f = e.target.files?.[0];
@@ -592,7 +744,13 @@ export default function CSVMappingStep() {
                     {comparing ? 'Comparando…' : 'Subir reporte y comparar'}
                   </Button>
                   {compareResult && (
-                    <Box>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                      {compareResult.importedToHistory > 0 && (
+                        <Alert severity="info" sx={{ fontSize: '0.82rem' }}>
+                          <strong>{compareResult.importedToHistory}</strong> IDs nuevos guardados en el historial
+                          ({compareResult.doneInReport} con status <em>done</em> en el reporte).
+                        </Alert>
+                      )}
                       {compareResult.duplicateCount === 0 ? (
                         <Alert severity="success" sx={{ fontSize: '0.82rem' }}>
                           Sin duplicados — ningún ID del CSV actual aparece en el reporte anterior.
@@ -600,7 +758,7 @@ export default function CSVMappingStep() {
                       ) : (
                         <Alert severity="warning" sx={{ fontSize: '0.82rem' }}>
                           <strong>{compareResult.duplicateCount} IDs duplicados</strong> de {compareResult.totalCurrent} en tu CSV
-                          ya existen en el reporte ({compareResult.totalReport} filas). SM2 los rechazará al intentar migrarlos.
+                          ya existen en el reporte ({compareResult.totalReport} filas). SM2 los rechazará.
                           {compareResult.hasMore && ' Se muestran los primeros 100.'}
                           <List dense disablePadding sx={{ mt: 1, maxHeight: 140, overflow: 'auto' }}>
                             {compareResult.duplicates.map((id) => (

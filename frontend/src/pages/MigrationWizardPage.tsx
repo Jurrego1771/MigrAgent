@@ -1,4 +1,5 @@
-import { Box, Typography, Button, alpha, Chip } from '@mui/material';
+import { useState } from 'react';
+import { Box, Typography, Button, alpha, Chip, CircularProgress } from '@mui/material';
 import {
   ArrowBack as ArrowBackIcon,
   ArrowForward as ArrowForwardIcon,
@@ -6,6 +7,7 @@ import {
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { WizardProvider, useWizard, WIZARD_STEPS } from '../context/WizardContext';
+import { csvApi } from '../services/api';
 import WizardStepper from '../components/wizard/WizardStepper';
 import AuthStep from '../components/wizard/steps/AuthStep';
 import AccountValidationStep from '../components/wizard/steps/AccountValidationStep';
@@ -64,10 +66,38 @@ function PlaceholderStep({ stepId }: { stepId: number }) {
 
 function WizardLayout() {
   const navigate = useNavigate();
-  const { currentStep, steps, goNext, goBack, canGoNext } = useWizard();
+  const { currentStep, steps, goNext, goBack, canGoNext, csvStep, setCsvStep } = useWizard();
   const isFirst = currentStep === 1;
   const isLast = currentStep === steps.length;
   const currentStepDef = steps[currentStep - 1];
+  const [normalizing, setNormalizing] = useState(false);
+
+  const handleNext = async () => {
+    // Paso 3 → 4: normalizar CSV antes de avanzar
+    if (currentStep === 3 && csvStep.tempFile && !csvStep.normalizedTempId) {
+      setNormalizing(true);
+      try {
+        const idColumn = csvStep.mappings.find((m) => m.mapper === 'id')?.field;
+        const skipDuplicateIds = csvStep.skipHistoryDuplicates && csvStep.historyDuplicates
+          ? csvStep.historyDuplicates.ids
+          : [];
+
+        const result = await csvApi.normalizeTemp(
+          csvStep.tempFile.tempId,
+          csvStep.extraColumns,
+          csvStep.transformationRules,
+          skipDuplicateIds,
+          idColumn
+        );
+        setCsvStep({ normalizedTempId: result.normalizedTempId });
+      } catch {
+        // Si falla, aún así avanzamos — URLValidationStep usará tempFile.tempId como fallback
+      } finally {
+        setNormalizing(false);
+      }
+    }
+    goNext();
+  };
 
   return (
     <Box
@@ -220,12 +250,12 @@ function WizardLayout() {
             {/* Continuar / Finalizar */}
             <Button
               variant="contained"
-              onClick={isLast ? () => navigate('/migrations') : goNext}
-              disabled={!canGoNext}
-              endIcon={!isLast && <ArrowForwardIcon />}
+              onClick={isLast ? () => navigate('/migrations') : handleNext}
+              disabled={!canGoNext || normalizing}
+              endIcon={normalizing ? <CircularProgress size={16} /> : (!isLast && <ArrowForwardIcon />)}
               sx={{ fontWeight: 700, px: 3 }}
             >
-              {isLast ? 'Finalizar' : 'Continuar'}
+              {normalizing ? 'Preparando CSV…' : isLast ? 'Finalizar' : 'Continuar'}
             </Button>
           </Box>
         </Box>

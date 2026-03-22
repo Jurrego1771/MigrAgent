@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
-import { SessionInfo, AccountValidationState, CSVWizardState, MappingConfig, ExtraColumn, URLValidationWizardState } from '../types';
+import { SessionInfo, AccountValidationState, CSVWizardState, MappingConfig, ExtraColumn, URLValidationWizardState, TransformationRule } from '../types';
 
 // ---------------------------------------------------------------------------
 // Definición de pasos
@@ -48,6 +48,10 @@ const DEFAULT_CSV_STATE: CSVWizardState = {
   mappings: [],
   extraColumns: [],
   normalizedTempId: null,
+  transformationRules: [],
+  templateId: null,
+  historyDuplicates: null,
+  skipHistoryDuplicates: false,
 };
 
 const DEFAULT_URL_VALIDATION: URLValidationWizardState = {
@@ -78,6 +82,8 @@ interface WizardContextValue extends WizardState {
   setCsvStep: (update: Partial<CSVWizardState>) => void;
   setMappings: (mappings: MappingConfig[]) => void;
   setExtraColumns: (cols: ExtraColumn[]) => void;
+  setTransformationRules: (rules: TransformationRule[]) => void;
+  setSkipHistoryDuplicates: (skip: boolean) => void;
   setUrlValidation: (update: Partial<URLValidationWizardState>) => void;
   canGoNext: boolean;
   isStepComplete: (step: number) => boolean;
@@ -114,6 +120,14 @@ export function WizardProvider({ children }: { children: ReactNode }) {
 
   const setExtraColumns = useCallback((cols: ExtraColumn[]) => {
     setCsvStepState((prev) => ({ ...prev, extraColumns: cols }));
+  }, []);
+
+  const setTransformationRules = useCallback((rules: TransformationRule[]) => {
+    setCsvStepState((prev) => ({ ...prev, transformationRules: rules }));
+  }, []);
+
+  const setSkipHistoryDuplicates = useCallback((skip: boolean) => {
+    setCsvStepState((prev) => ({ ...prev, skipHistoryDuplicates: skip }));
   }, []);
 
   const setUrlValidation = useCallback((update: Partial<URLValidationWizardState>) => {
@@ -202,6 +216,8 @@ export function WizardProvider({ children }: { children: ReactNode }) {
         setCsvStep,
         setMappings,
         setExtraColumns,
+        setTransformationRules,
+        setSkipHistoryDuplicates,
         setUrlValidation,
         canGoNext,
         isStepComplete,

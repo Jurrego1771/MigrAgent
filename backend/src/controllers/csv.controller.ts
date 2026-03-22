@@ -1,10 +1,12 @@
 import { Request, Response } from 'express';
 import { CSVValidatorService } from '../services/csv-validator.service.js';
 import { URLValidatorService } from '../services/url-validator.service.js';
-import { MappingConfig } from '../types/index.js';
+import { MappingConfig, TransformationRule } from '../types/index.js';
+import { PrismaClient } from '@prisma/client';
 import fs from 'fs/promises';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
+import AdmZip from 'adm-zip';
 
 const TEMP_DIR = path.join(process.cwd(), 'uploads', 'temp');
 
@@ -13,6 +15,7 @@ fs.mkdir(TEMP_DIR, { recursive: true }).catch(() => {});
 
 const csvValidator = new CSVValidatorService();
 const urlValidator = new URLValidatorService();
+const prisma = new PrismaClient();
 
 export class CSVController {
   // POST /api/csv/analyze - Analizar CSV y detectar campos
@@ -170,11 +173,14 @@ export class CSVController {
     }
   }
 
-  // POST /api/csv/temp/:id/normalize — genera CSV normalizado con columnas extra
+  // POST /api/csv/temp/:id/normalize — genera CSV normalizado con columnas extra y reglas de transformación
   static async normalizeTemp(req: Request, res: Response) {
     const { id } = req.params as { id: string };
-    const { extraColumns = [] } = req.body as {
+    const { extraColumns = [], transformationRules = [], skipDuplicateIds = [], idColumn } = req.body as {
       extraColumns?: { name: string; defaultValue: string }[];
+      transformationRules?: TransformationRule[];
+      skipDuplicateIds?: string[];
+      idColumn?: string;
     };
 
     const inputPath = path.join(TEMP_DIR, `${id}.csv`);
@@ -188,12 +194,16 @@ export class CSVController {
     const normalizedId = uuidv4();
     const outputPath = path.join(TEMP_DIR, `${normalizedId}.csv`);
 
-    const result = await csvValidator.normalizeCSV(inputPath, outputPath, extraColumns);
+    const skipSet = new Set(skipDuplicateIds);
+    const result = await csvValidator.normalizeCSV(
+      inputPath, outputPath, extraColumns, transformationRules, skipSet, idColumn
+    );
 
     res.json({
       normalizedTempId: normalizedId,
       rowCount: result.rowCount,
       addedColumns: result.addedColumns,
+      skippedCount: result.skippedCount,
     });
   }
 
@@ -298,7 +308,8 @@ export class CSVController {
     res.json({ results, summary });
   }
 
-  // POST /api/csv/temp/:id/compare-report — cruza IDs del CSV actual contra un reporte de migración anterior
+  // POST /api/csv/temp/:id/compare-report — cruza IDs del CSV actual contra un reporte SM2 (CSV o ZIP)
+  // También importa los IDs con migrationStatus=done al historial de MigratedItem
   static async compareWithReport(req: Request, res: Response) {
     const { id } = req.params as { id: string };
     const { idField } = req.body as { idField?: string };
@@ -315,29 +326,110 @@ export class CSVController {
       return res.status(404).json({ error: 'Archivo CSV temporal no encontrado' });
     }
 
+    // Si es ZIP, extraer el CSV interno
+    let csvReportPath = reportFile.path;
+    let extractedTemp: string | null = null;
+    const isZip = reportFile.originalname?.toLowerCase().endsWith('.zip') ||
+                  reportFile.mimetype === 'application/zip' ||
+                  reportFile.mimetype === 'application/x-zip-compressed';
+
+    if (isZip) {
+      try {
+        const zip = new AdmZip(reportFile.path);
+        const csvEntry = zip.getEntries().find((e) => e.entryName.endsWith('.csv'));
+        if (!csvEntry) {
+          await fs.unlink(reportFile.path).catch(() => {});
+          return res.status(400).json({ error: 'El ZIP no contiene ningún archivo CSV' });
+        }
+        extractedTemp = path.join(TEMP_DIR, `report-${uuidv4()}.csv`);
+        await fs.writeFile(extractedTemp, csvEntry.getData());
+        csvReportPath = extractedTemp;
+      } catch {
+        await fs.unlink(reportFile.path).catch(() => {});
+        return res.status(400).json({ error: 'Error al descomprimir el ZIP' });
+      }
+    }
+
     try {
-      // Extraer IDs del CSV actual y del reporte en paralelo
-      const [currentIds, reportIds] = await Promise.all([
-        csvValidator.extractIds(currentPath, idField),
-        csvValidator.extractIds(reportFile.path, idField),
-      ]);
+      // Parsear reporte SM2 para obtener IDs migrados exitosamente
+      const reportParsed = await csvValidator.parseReportIds(csvReportPath);
+      const importedIds = reportParsed.ids;
+
+      // Guardar IDs done en MigratedItem (ignorar duplicados)
+      let importedCount = 0;
+      if (importedIds.length > 0) {
+        const existing = await prisma.migratedItem.findMany({
+          where: { itemId: { in: importedIds } },
+          select: { itemId: true },
+        });
+        const existingSet = new Set(existing.map((e) => e.itemId));
+        const newIds = importedIds.filter((id) => !existingSet.has(id));
+
+        if (newIds.length > 0) {
+          await prisma.migratedItem.createMany({
+            data: newIds.map((itemId) => ({ itemId, source: 'report' })),
+          });
+          importedCount = newIds.length;
+        }
+      }
+
+      // Cruzar contra el CSV actual para detectar duplicados en el flujo actual
+      const currentIds = await csvValidator.extractIds(currentPath, idField);
+      const reportIdSet = new Set(importedIds);
+      const duplicates = currentIds.filter((cid) => reportIdSet.has(cid));
 
       await fs.unlink(reportFile.path).catch(() => {});
-
-      const reportIdSet = new Set(reportIds);
-      const duplicates = currentIds.filter((id) => reportIdSet.has(id));
+      if (extractedTemp) await fs.unlink(extractedTemp).catch(() => {});
 
       res.json({
         totalCurrent: currentIds.length,
-        totalReport: reportIds.length,
+        totalReport: reportParsed.totalRows,
         duplicateCount: duplicates.length,
-        duplicates: duplicates.slice(0, 100), // máx 100 para no saturar la respuesta
+        duplicates: duplicates.slice(0, 100),
         hasMore: duplicates.length > 100,
+        importedToHistory: importedCount, // cuántos IDs nuevos se guardaron en el historial
+        doneInReport: reportParsed.doneCount,
       });
     } catch (error) {
       await fs.unlink(reportFile.path).catch(() => {});
+      if (extractedTemp) await fs.unlink(extractedTemp).catch(() => {});
       throw error;
     }
+  }
+
+  // POST /api/csv/temp/:id/check-history — cruza IDs del CSV actual contra el historial de MigratedItem
+  static async checkHistory(req: Request, res: Response) {
+    const { id } = req.params as { id: string };
+    const { idColumn } = req.body as { idColumn: string };
+
+    if (!idColumn) return res.status(400).json({ error: 'idColumn requerido' });
+
+    const filePath = path.join(TEMP_DIR, `${id}.csv`);
+    try {
+      await fs.access(filePath);
+    } catch {
+      return res.status(404).json({ error: 'Archivo temporal no encontrado' });
+    }
+
+    const currentIds = await csvValidator.extractIds(filePath, idColumn);
+    if (currentIds.length === 0) {
+      return res.json({ totalCurrent: 0, duplicateCount: 0, duplicates: [], hasMore: false });
+    }
+
+    const found = await prisma.migratedItem.findMany({
+      where: { itemId: { in: currentIds } },
+      select: { itemId: true },
+      distinct: ['itemId'],
+    });
+
+    const duplicates = found.map((f) => f.itemId);
+
+    res.json({
+      totalCurrent: currentIds.length,
+      duplicateCount: duplicates.length,
+      duplicates: duplicates.slice(0, 200),
+      hasMore: duplicates.length > 200,
+    });
   }
 
   // GET /api/csv/mapper-options - Obtener opciones de mappers disponibles

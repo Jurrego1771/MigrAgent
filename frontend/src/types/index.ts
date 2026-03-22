@@ -30,6 +30,12 @@ export interface AccountModuleChecks {
   drm: boolean;
 }
 
+export interface AIFeatureStatus {
+  enabled: boolean;
+  automatic: boolean;
+  model?: string;
+}
+
 export interface AccountInfo {
   account: {
     id: string | null;
@@ -41,6 +47,7 @@ export interface AccountInfo {
   };
   modules: Record<string, boolean>;
   moduleChecks: AccountModuleChecks;
+  aiSettings?: Record<string, AIFeatureStatus>;
 }
 
 export interface RenditionRule {
@@ -83,6 +90,11 @@ export interface CSVWizardState {
   mappings: MappingConfig[];            // editados por el usuario
   extraColumns: ExtraColumn[];          // columnas adicionales a agregar
   normalizedTempId: string | null;      // ID del CSV normalizado (listo para SM2)
+  transformationRules: TransformationRule[]; // reglas de transformación de datos
+  templateId: string | null;            // template aplicado (para incrementar usageCount)
+  // Deduplicación por historial
+  historyDuplicates: { count: number; ids: string[] } | null;
+  skipHistoryDuplicates: boolean;
 }
 
 // ==================== URL Validation Wizard (Step 4) ====================
@@ -175,6 +187,8 @@ export interface Migration {
   retryBackoffType: 'fixed' | 'linear' | 'exponential';
   retryInitialDelay: number;
   retryMaxDelay: number;
+  // Checkpoint para reanudación
+  checkpointData?: string; // JSON stringified { lastSuccessfulRow, sm2MigrationId, timestamp }
   createdAt: string;
   updatedAt: string;
   validationResults?: ValidationResult[];
@@ -356,4 +370,55 @@ export interface Settings {
   errorThresholdPercent: number;
   urlCheckTimeout: number;
   urlCheckConcurrency: number;
+  // Notificaciones
+  notificationEmail?: string;
+  notificationWebhookUrl?: string;
+  notifyOnComplete: boolean;
+  notifyOnError: boolean;
+}
+
+// ==================== Batch Config ====================
+
+export interface BatchConfig {
+  enabled: boolean;
+  size: number;
+  namePrefix: string;
+  mode: 'auto' | 'manual';
+}
+
+// ==================== Transformation Rules ====================
+
+export type TransformationRuleType =
+  | 'replace'
+  | 'prefix'
+  | 'suffix'
+  | 'uppercase'
+  | 'lowercase'
+  | 'trim'
+  | 'regex'
+  | 'map_value'
+  | 'default'
+  | 'truncate';
+
+export interface TransformationRule {
+  id: string;
+  field: string;
+  type: TransformationRuleType;
+  find?: string;
+  replace?: string;
+  value?: string;
+  mappingTable?: Record<string, string>;
+  enabled: boolean;
+}
+
+export interface StatsHistory {
+  id: string;
+  migrationId: string;
+  waiting: number;
+  queued: number;
+  running: number;
+  done: number;
+  error: number;
+  speed: number;
+  timestamp: string;
 }

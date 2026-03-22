@@ -126,6 +126,17 @@ export const useRetryMigration = () => {
   });
 };
 
+export const useResumeMigration = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: migrationApi.resume,
+    onSuccess: (_, id) => {
+      queryClient.invalidateQueries({ queryKey: ['migration', id] });
+    },
+  });
+};
+
 export const useMigrationStats = (id: string, enabled: boolean = true) => {
   return useQuery({
     queryKey: ['migration', id, 'stats'],
@@ -143,6 +154,15 @@ export const useMigrationLogs = (
     queryKey: ['migration', id, 'logs', params],
     queryFn: () => migrationApi.getLogs(id, params),
     enabled: !!id,
+  });
+};
+
+export const useMigrationStatsHistory = (id: string) => {
+  return useQuery({
+    queryKey: ['migration', id, 'stats-history'],
+    queryFn: () => migrationApi.getStatsHistory(id),
+    enabled: !!id,
+    refetchInterval: 30000,
   });
 };
 

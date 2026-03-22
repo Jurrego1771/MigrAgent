@@ -18,6 +18,9 @@ import {
   RenditionsInfo,
   URLValidationSummary,
   SM2Migration,
+  StatsHistory,
+  TransformationRule,
+  BatchConfig,
 } from '../types';
 
 const api = axios.create({
@@ -104,6 +107,11 @@ export const migrationApi = {
     await api.post(`/migrations/${id}/retry`);
   },
 
+  resume: async (id: string): Promise<{ success: boolean; fromRow: number }> => {
+    const { data } = await api.post(`/migrations/${id}/resume`);
+    return data;
+  },
+
   getStats: async (id: string): Promise<EnrichedStats> => {
     const { data } = await api.get(`/migrations/${id}/stats`);
     return data;
@@ -116,6 +124,13 @@ export const migrationApi = {
     const { data } = await api.get(`/migrations/${id}/logs`, { params });
     return data;
   },
+
+  getStatsHistory: async (id: string): Promise<StatsHistory[]> => {
+    const { data } = await api.get(`/migrations/${id}/stats-history`);
+    return data;
+  },
+
+  downloadReport: (id: string): string => `/api/migrations/${id}/report/csv`,
 };
 
 // ==================== Templates ====================
@@ -229,9 +244,14 @@ export const csvApi = {
 
   normalizeTemp: async (
     tempId: string,
-    extraColumns: { name: string; defaultValue: string }[]
-  ): Promise<{ normalizedTempId: string; rowCount: number; addedColumns: string[] }> => {
-    const { data } = await api.post(`/csv/temp/${tempId}/normalize`, { extraColumns });
+    extraColumns: { name: string; defaultValue: string }[],
+    transformationRules: TransformationRule[] = [],
+    skipDuplicateIds: string[] = [],
+    idColumn?: string
+  ): Promise<{ normalizedTempId: string; rowCount: number; addedColumns: string[]; skippedCount: number }> => {
+    const { data } = await api.post(`/csv/temp/${tempId}/normalize`, {
+      extraColumns, transformationRules, skipDuplicateIds, idColumn,
+    });
     return data;
   },
 
@@ -273,6 +293,8 @@ export const csvApi = {
     duplicateCount: number;
     duplicates: string[];
     hasMore: boolean;
+    importedToHistory: number;
+    doneInReport: number;
   }> => {
     const formData = new FormData();
     formData.append('reportFile', reportFile);
@@ -280,6 +302,14 @@ export const csvApi = {
     const { data } = await api.post(`/csv/temp/${tempId}/compare-report`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
+    return data;
+  },
+
+  checkHistory: async (
+    tempId: string,
+    idColumn: string
+  ): Promise<{ totalCurrent: number; duplicateCount: number; duplicates: string[]; hasMore: boolean }> => {
+    const { data } = await api.post(`/csv/temp/${tempId}/check-history`, { idColumn });
     return data;
   },
 };
@@ -364,8 +394,45 @@ export const wizardApi = {
     mappings: MappingConfig[];
     normalizedTempId: string;
     templateId?: string;
-  }): Promise<{ migrationId: string; mediastreamId: string }> => {
+    transformationRules?: TransformationRule[];
+    batchConfig?: BatchConfig;
+    saveAsTemplate?: { name: string; expectedHeaders: string[] };
+  }): Promise<{
+    migrationId: string;
+    mediastreamId: string;
+    isBatch?: boolean;
+    batchGroupId?: string;
+    totalBatches?: number;
+    batches?: Array<{ migrationId: string; mediastreamId: string; index: number; rowCount: number }>;
+  }> => {
     const { data } = await api.post('/wizard/create', params);
+    return data;
+  },
+};
+
+// ==================== Dashboard ====================
+
+export const dashboardApi = {
+  getMetrics: async (): Promise<{
+    totalMigrations: number;
+    byStatus: Record<string, number>;
+    totalItemsMigrated: number;
+    totalItemsWithErrors: number;
+    successRate: number | null;
+    activity: Array<{ date: string; created: number; completed: number }>;
+    recentMigrations: Array<{
+      id: string;
+      name: string;
+      status: string;
+      processedItems: number;
+      totalItems: number;
+      errorItems: number;
+      createdAt: string;
+      strategy: string;
+    }>;
+    topTemplates: Array<{ id: string; name: string; usageCount: number; strategy: string }>;
+  }> => {
+    const { data } = await api.get('/dashboard/metrics');
     return data;
   },
 };

@@ -38,6 +38,10 @@ export default function SettingsPage() {
     errorThresholdPercent: 10,
     urlCheckTimeout: 10000,
     urlCheckConcurrency: 5,
+    notificationEmail: '',
+    notificationWebhookUrl: '',
+    notifyOnComplete: false,
+    notifyOnError: false,
   });
 
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
@@ -54,6 +58,10 @@ export default function SettingsPage() {
         errorThresholdPercent: settings.errorThresholdPercent,
         urlCheckTimeout: settings.urlCheckTimeout,
         urlCheckConcurrency: settings.urlCheckConcurrency,
+        notificationEmail: settings.notificationEmail || '',
+        notificationWebhookUrl: settings.notificationWebhookUrl || '',
+        notifyOnComplete: settings.notifyOnComplete ?? false,
+        notifyOnError: settings.notifyOnError ?? false,
       });
     }
   }, [settings]);
@@ -286,6 +294,64 @@ export default function SettingsPage() {
                 }}
                 fullWidth
                 helperText="Número de URLs a verificar en paralelo"
+              />
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* Notificaciones */}
+        <Grid item xs={12} md={6}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                Notificaciones
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                Recibe alertas por email o webhook cuando una migración finaliza o presenta errores.
+              </Typography>
+
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={formData.notifyOnComplete}
+                    onChange={(e) => handleChange('notifyOnComplete', e.target.checked)}
+                  />
+                }
+                label="Notificar al completar una migración"
+                sx={{ mb: 1, display: 'block' }}
+              />
+
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={formData.notifyOnError}
+                    onChange={(e) => handleChange('notifyOnError', e.target.checked)}
+                  />
+                }
+                label="Notificar en alertas de error / estancamiento"
+                sx={{ mb: 3, display: 'block' }}
+              />
+
+              <Divider sx={{ my: 2 }} />
+
+              <TextField
+                label="Email de notificación"
+                type="email"
+                value={formData.notificationEmail}
+                onChange={(e) => handleChange('notificationEmail', e.target.value)}
+                fullWidth
+                sx={{ mb: 2 }}
+                helperText="Requiere configurar SMTP_HOST, SMTP_USER y SMTP_PASS en variables de entorno"
+                placeholder="admin@empresa.com"
+              />
+
+              <TextField
+                label="Webhook URL"
+                value={formData.notificationWebhookUrl}
+                onChange={(e) => handleChange('notificationWebhookUrl', e.target.value)}
+                fullWidth
+                helperText="MigrAgent hará un POST JSON a esta URL al finalizar cada migración"
+                placeholder="https://hooks.slack.com/..."
               />
             </CardContent>
           </Card>

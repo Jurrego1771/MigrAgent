@@ -329,6 +329,46 @@ export class MediastreamService {
     };
   }
 
+  // ==================== AI / IA Settings ====================
+
+  async getAISettings(): Promise<Record<string, unknown>> {
+    const candidates = [
+      '/api/settings/ia',
+      '/api/settings/ai',
+      '/api/settings/intelligence',
+      '/api/settings/transcription',
+      '/api/settings/automatic',
+    ];
+
+    const probeResults: Record<string, unknown> = {};
+
+    for (const path of candidates) {
+      try {
+        const response = await this.client.get(path);
+        probeResults[path] = { status: response.status, data: response.data };
+      } catch (err: any) {
+        probeResults[path] = {
+          status: err?.response?.status ?? 'network_error',
+          error: err?.response?.data ?? err?.message,
+        };
+      }
+    }
+
+    // Volcar también el objeto account completo para inspección
+    let accountRaw: unknown = null;
+    try {
+      const res = await this.client.get('/api/account');
+      accountRaw = res.data;
+    } catch (err: any) {
+      accountRaw = { error: err?.message };
+    }
+
+    return {
+      _probes: probeResults,
+      _accountRaw: accountRaw,
+    };
+  }
+
   // ==================== Account ====================
 
   async getAccountInfo(): Promise<Record<string, unknown>> {

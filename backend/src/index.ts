@@ -9,6 +9,7 @@ import { Server as SocketIOServer } from 'socket.io';
 import { config } from './config/index.js';
 import routes from './routes/index.js';
 import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
+import { setIO } from './socket.js';
 
 const app = express();
 const httpServer = createServer(app);
@@ -61,6 +62,9 @@ io.on('connection', (socket) => {
     console.log('Client disconnected:', socket.id);
   });
 });
+
+// Register io singleton for use in services
+setIO(io);
 
 // Export io for use in services
 export { io };

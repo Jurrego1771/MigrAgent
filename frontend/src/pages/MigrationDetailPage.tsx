@@ -35,28 +35,40 @@ import {
   Refresh as RetryIcon,
   Delete as DeleteIcon,
   ArrowBack as BackIcon,
-  CheckCircle as SuccessIcon,
-  Error as ErrorIcon,
-  Warning as WarningIcon,
   Speed as SpeedIcon,
   Timer as TimerIcon,
   CloudUpload as UploadIcon,
+  Download as DownloadIcon,
+  FastForward as ResumeIcon,
 } from '@mui/icons-material';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as RechartsTooltip,
+  Legend,
+  ResponsiveContainer,
+} from 'recharts';
 import {
   useMigration,
   useMigrationStats,
   useMigrationLogs,
   useMigrationValidation,
+  useMigrationStatsHistory,
   useStartMigration,
   useStopMigration,
   useRetryMigration,
+  useResumeMigration,
   useDeleteMigration,
   useCreateInMediastream,
   useValidateMigration,
 } from '../hooks/useApi';
+import { useMigrationSocket } from '../hooks/useSocket';
+import { migrationApi } from '../services/api';
 import { useApp } from '../context/AppContext';
-import { MigrationStatus, MappingConfig, CSVValidationError } from '../types';
+import { MigrationStatus, MappingConfig, CSVValidationError, StatsHistory } from '../types';
 import { useDropzone } from 'react-dropzone';
 
 const statusConfig: Record<
@@ -78,13 +90,19 @@ export default function MigrationDetailPage() {
   const { showNotification } = useApp();
 
   const { data: migration, isLoading, refetch } = useMigration(id!);
+  // Stats: con socket activo el polling puede ser más lento (fallback)
   const { data: stats } = useMigrationStats(id!, migration?.status === 'running');
   const { data: logs } = useMigrationLogs(id!, { limit: 50 });
   const { data: validation } = useMigrationValidation(id!);
+  const { data: statsHistory } = useMigrationStatsHistory(id!);
+
+  // Socket.IO: actualizaciones en tiempo real
+  useMigrationSocket(id);
 
   const startMutation = useStartMigration();
   const stopMutation = useStopMigration();
   const retryMutation = useRetryMigration();
+  const resumeMutation = useResumeMigration();
   const deleteMutation = useDeleteMigration();
   const createInMSMutation = useCreateInMediastream();
   const validateMutation = useValidateMigration();
@@ -124,6 +142,16 @@ export default function MigrationDetailPage() {
       refetch();
     } catch (error) {
       showNotification('Error al reintentar', 'error');
+    }
+  };
+
+  const handleResume = async () => {
+    try {
+      const result = await resumeMutation.mutateAsync(id!);
+      showNotification(`Migración reanudada desde fila ${result.fromRow}`, 'success');
+      refetch();
+    } catch (error) {
+      showNotification('Error al reanudar la migración', 'error');
     }
   };
 
@@ -241,6 +269,24 @@ export default function MigrationDetailPage() {
               Pausar
             </Button>
           )}
+          {(migration.status === 'paused' || migration.status === 'error') && migration.checkpointData && (
+            (() => {
+              const cp = JSON.parse(migration.checkpointData) as { lastSuccessfulRow: number };
+              return (
+                <Tooltip title={`Reanudar desde fila ${cp.lastSuccessfulRow}`}>
+                  <Button
+                    variant="contained"
+                    color="secondary"
+                    startIcon={resumeMutation.isPending ? <CircularProgress size={18} /> : <ResumeIcon />}
+                    onClick={handleResume}
+                    disabled={resumeMutation.isPending}
+                  >
+                    Reanudar (fila {cp.lastSuccessfulRow})
+                  </Button>
+                </Tooltip>
+              );
+            })()
+          )}
           {(migration.status === 'done' || migration.status === 'paused') &&
             migration.errorItems > 0 && (
               <Button
@@ -252,6 +298,17 @@ export default function MigrationDetailPage() {
                 Reintentar Errores
               </Button>
             )}
+          {(migration.status === 'done' || migration.status === 'running' || migration.status === 'paused') && (
+            <Tooltip title="Descargar reporte CSV">
+              <IconButton
+                component="a"
+                href={migrationApi.downloadReport(id!)}
+                download
+              >
+                <DownloadIcon />
+              </IconButton>
+            </Tooltip>
+          )}
           <Tooltip title="Eliminar migración">
             <IconButton onClick={() => setDeleteDialogOpen(true)} color="error">
               <DeleteIcon />
@@ -358,6 +415,14 @@ export default function MigrationDetailPage() {
                   <Typography color="text.secondary">Auto-retry:</Typography>
                   <Typography>{migration.retryEnabled ? 'Sí' : 'No'}</Typography>
                 </Box>
+                {migration.checkpointData && (
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Typography color="text.secondary">Checkpoint:</Typography>
+                    <Typography color="secondary.main">
+                      Fila {(JSON.parse(migration.checkpointData) as { lastSuccessfulRow: number }).lastSuccessfulRow}
+                    </Typography>
+                  </Box>
+                )}
               </Box>
             </CardContent>
           </Card>
@@ -370,6 +435,7 @@ export default function MigrationDetailPage() {
           <Tab label="Mapeo de Campos" />
           <Tab label={`Errores (${errors.length})`} />
           <Tab label="Logs" />
+          <Tab label="Estadísticas" />
         </Tabs>
 
         <CardContent>
@@ -485,6 +551,71 @@ export default function MigrationDetailPage() {
               ) : (
                 <Typography color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
                   No hay logs disponibles
+                </Typography>
+              )}
+            </Box>
+          )}
+
+          {/* Stats Tab */}
+          {activeTab === 3 && (
+            <Box>
+              {statsHistory && statsHistory.length > 1 ? (
+                <>
+                  <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 2 }}>
+                    Progreso en el tiempo ({statsHistory.length} puntos de datos)
+                  </Typography>
+                  <ResponsiveContainer width="100%" height={320}>
+                    <LineChart
+                      data={(statsHistory as StatsHistory[]).map((h) => ({
+                        time: new Date(h.timestamp).toLocaleTimeString([], {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        }),
+                        Exitosos: h.done,
+                        Errores: h.error,
+                        'Items/min': h.speed,
+                      }))}
+                      margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="time" tick={{ fontSize: 11 }} />
+                      <YAxis yAxisId="items" />
+                      <YAxis yAxisId="speed" orientation="right" />
+                      <RechartsTooltip />
+                      <Legend />
+                      <Line
+                        yAxisId="items"
+                        type="monotone"
+                        dataKey="Exitosos"
+                        stroke="#4caf50"
+                        dot={false}
+                        strokeWidth={2}
+                      />
+                      <Line
+                        yAxisId="items"
+                        type="monotone"
+                        dataKey="Errores"
+                        stroke="#f44336"
+                        dot={false}
+                        strokeWidth={2}
+                      />
+                      <Line
+                        yAxisId="speed"
+                        type="monotone"
+                        dataKey="Items/min"
+                        stroke="#2196f3"
+                        dot={false}
+                        strokeWidth={1}
+                        strokeDasharray="4 2"
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </>
+              ) : (
+                <Typography color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
+                  {migration.status === 'created' || migration.status === 'validated'
+                    ? 'Las estadísticas estarán disponibles una vez iniciada la migración.'
+                    : 'Acumulando datos de estadísticas...'}
                 </Typography>
               )}
             </Box>

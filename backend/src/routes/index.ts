@@ -10,6 +10,7 @@ import { SettingsController } from '../controllers/settings.controller.js';
 import { AuthController } from '../controllers/auth.controller.js';
 import { AccountController } from '../controllers/account.controller.js';
 import { WizardController } from '../controllers/wizard.controller.js';
+import { DashboardController } from '../controllers/dashboard.controller.js';
 
 const router = Router();
 
@@ -43,6 +44,9 @@ const upload = multer({
   },
 });
 
+// ==================== Dashboard Routes ====================
+router.get('/dashboard/metrics', DashboardController.getMetrics);
+
 // ==================== Auth Routes ====================
 router.post('/auth/login', AuthController.login);
 router.post('/auth/import', AuthController.importCredentials);
@@ -56,6 +60,7 @@ router.delete('/auth/sessions/:id', AuthController.revokeSession);
 router.get('/account/info', AccountController.getInfo);
 router.get('/account/renditions', AccountController.getRenditions);
 router.get('/account/categories', AccountController.getCategories);
+router.get('/account/ia-settings', AccountController.getIASettings);
 
 // ==================== Migration Routes ====================
 router.get('/migrations', MigrationController.list);
@@ -73,10 +78,13 @@ router.post('/migrations/:id/create-in-mediastream', MigrationController.createI
 router.post('/migrations/:id/start', MigrationController.start);
 router.post('/migrations/:id/stop', MigrationController.stop);
 router.post('/migrations/:id/retry', MigrationController.retry);
+router.post('/migrations/:id/resume', MigrationController.resume);
 
 // Migration stats & logs
 router.get('/migrations/:id/stats', MigrationController.getStats);
+router.get('/migrations/:id/stats-history', MigrationController.getStatsHistory);
 router.get('/migrations/:id/logs', MigrationController.getLogs);
+router.get('/migrations/:id/report/csv', MigrationController.downloadReport);
 
 // ==================== Template Routes ====================
 router.get('/templates', TemplateController.list);
@@ -100,6 +108,7 @@ router.post('/csv/temp/:id/normalize', CSVController.normalizeTemp);
 router.post('/csv/temp/:id/extract-urls', CSVController.extractUrlsFromTemp);
 router.post('/csv/temp/:id/validate-urls', CSVController.validateUrlsFromTemp);
 router.post('/csv/temp/:id/compare-report', upload.single('reportFile'), CSVController.compareWithReport);
+router.post('/csv/temp/:id/check-history', CSVController.checkHistory);
 router.delete('/csv/temp/:id', CSVController.cleanupTemp);
 router.get('/csv/temp/:id/download', CSVController.downloadTemp);
 
