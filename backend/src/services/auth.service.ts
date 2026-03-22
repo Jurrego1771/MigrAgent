@@ -1,9 +1,8 @@
 import crypto from 'crypto';
 import axios from 'axios';
-import { PrismaClient, AuthSession } from '@prisma/client';
+import { AuthSession } from '@prisma/client';
 import { config } from '../config/index.js';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma.js';
 
 // ---------------------------------------------------------------------------
 // Cifrado AES-256-GCM

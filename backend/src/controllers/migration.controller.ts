@@ -1,9 +1,8 @@
 import { Request, Response } from 'express';
 import { MigrationService } from '../services/migration.service.js';
-import { PrismaClient } from '@prisma/client';
 import { MappingConfig, RetryPolicy } from '../types/index.js';
+import prisma from '../lib/prisma.js';
 
-const prisma = new PrismaClient();
 const migrationService = new MigrationService(prisma);
 
 export class MigrationController {

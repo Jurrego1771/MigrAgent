@@ -2,11 +2,11 @@ import { Request, Response } from 'express';
 import { CSVValidatorService } from '../services/csv-validator.service.js';
 import { URLValidatorService } from '../services/url-validator.service.js';
 import { MappingConfig, TransformationRule } from '../types/index.js';
-import { PrismaClient } from '@prisma/client';
 import fs from 'fs/promises';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import AdmZip from 'adm-zip';
+import prisma from '../lib/prisma.js';
 
 const TEMP_DIR = path.join(process.cwd(), 'uploads', 'temp');
 
@@ -15,7 +15,6 @@ fs.mkdir(TEMP_DIR, { recursive: true }).catch(() => {});
 
 const csvValidator = new CSVValidatorService();
 const urlValidator = new URLValidatorService();
-const prisma = new PrismaClient();
 
 export class CSVController {
   // POST /api/csv/analyze - Analizar CSV y detectar campos

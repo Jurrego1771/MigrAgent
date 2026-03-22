@@ -1,9 +1,8 @@
 import { Request, Response } from 'express';
 import { TemplateService } from '../services/template.service.js';
-import { PrismaClient } from '@prisma/client';
 import { TemplateData } from '../types/index.js';
+import prisma from '../lib/prisma.js';
 
-const prisma = new PrismaClient();
 const templateService = new TemplateService(prisma);
 
 export class TemplateController {

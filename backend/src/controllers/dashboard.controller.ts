@@ -1,7 +1,5 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma.js';
 
 export class DashboardController {
   /**
@@ -9,6 +7,7 @@ export class DashboardController {
    * Agrega métricas globales de todas las migraciones para el dashboard.
    */
   static async getMetrics(req: Request, res: Response): Promise<void> {
+    try {
     const [migrations, recentMigrations] = await Promise.all([
       prisma.migration.findMany({
         select: {
@@ -85,5 +84,11 @@ export class DashboardController {
       recentMigrations,
       topTemplates: templates,
     });
+    } catch (error) {
+      res.status(500).json({
+        error: 'Error al obtener métricas del dashboard',
+        details: error instanceof Error ? error.message : 'Error desconocido',
+      });
+    }
   }
 }

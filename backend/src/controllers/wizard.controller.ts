@@ -1,5 +1,4 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
 import { MediastreamService } from '../services/mediastream.service.js';
 import { CSVValidatorService } from '../services/csv-validator.service.js';
 import { TemplateService } from '../services/template.service.js';
@@ -7,8 +6,8 @@ import { MappingConfig, TransformationRule, BatchConfig } from '../types/index.j
 import path from 'path';
 import fs from 'fs/promises';
 import { v4 as uuidv4 } from 'uuid';
+import prisma from '../lib/prisma.js';
 
-const prisma = new PrismaClient();
 const csvValidator = new CSVValidatorService();
 const templateService = new TemplateService(prisma);
 const TEMP_DIR = path.join(process.cwd(), 'uploads', 'temp');
@@ -63,7 +62,7 @@ export class WizardController {
         });
         batchTemplateId = tpl.id;
       } else if (templateId) {
-        await templateService.incrementUsage(templateId).catch(() => {});
+        await templateService.incrementUsage(templateId).catch((err) => console.error('Error incrementing template usage:', err));
       }
       return WizardController._createBatchMigrations(res, {
         name,
@@ -90,7 +89,7 @@ export class WizardController {
       resolvedTemplateId = tpl.id;
     } else if (templateId) {
       // Incrementar uso del template detectado
-      await templateService.incrementUsage(templateId).catch(() => {});
+      await templateService.incrementUsage(templateId).catch((err) => console.error('Error incrementing template usage:', err));
     }
 
     // ── MIGRACIÓN SIMPLE ────────────────────────────────────────────────────

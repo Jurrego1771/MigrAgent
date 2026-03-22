@@ -1,8 +1,7 @@
 import { Request, Response } from 'express';
 import { MigrationService } from '../services/migration.service.js';
-import { PrismaClient } from '@prisma/client';
+import prisma from '../lib/prisma.js';
 
-const prisma = new PrismaClient();
 const migrationService = new MigrationService(prisma);
 
 export class AlertController {
@@ -29,24 +28,13 @@ export class AlertController {
   // PUT /api/alerts/acknowledge-all
   static async acknowledgeAll(req: Request, res: Response) {
     const { migrationId } = req.body;
-
-    await prisma.alert.updateMany({
-      where: {
-        acknowledged: false,
-        ...(migrationId && { migrationId }),
-      },
-      data: { acknowledged: true },
-    });
-
+    await migrationService.acknowledgeAllAlerts(migrationId as string | undefined);
     res.json({ success: true });
   }
 
   // GET /api/alerts/unread-count
   static async getUnreadCount(req: Request, res: Response) {
-    const count = await prisma.alert.count({
-      where: { acknowledged: false },
-    });
-
+    const count = await migrationService.getUnreadAlertCount();
     res.json({ count });
   }
 }

@@ -1,8 +1,6 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
 import { MediastreamService } from '../services/mediastream.service.js';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma.js';
 
 export class SettingsController {
   // GET /api/settings

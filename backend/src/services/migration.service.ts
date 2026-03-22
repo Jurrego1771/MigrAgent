@@ -1,4 +1,6 @@
 import { PrismaClient, Migration, MigrationLog, Alert, StatsHistory } from '@prisma/client';
+import path from 'path';
+import fs from 'fs/promises';
 import { MediastreamService } from './mediastream.service.js';
 import { CSVValidatorService } from './csv-validator.service.js';
 import { TemplateService } from './template.service.js';
@@ -287,11 +289,12 @@ export class MigrationService {
       throw new Error(`No se puede reanudar desde estado "${migration.status}"`);
     }
 
-    const checkpoint = JSON.parse(migration.checkpointData) as {
-      lastSuccessfulRow: number;
-      sm2MigrationId: string;
-      timestamp: string;
-    };
+    let checkpoint: { lastSuccessfulRow: number; sm2MigrationId: string; timestamp: string };
+    try {
+      checkpoint = JSON.parse(migration.checkpointData) as typeof checkpoint;
+    } catch {
+      throw new Error('El checkpoint guardado está corrupto. No se puede reanudar.');
+    }
 
     // SM2 no soporta reanudación parcial nativa — reiniciamos la migración en SM2
     // pero mantenemos el contexto de checkpoint en nuestra DB para auditoría.
@@ -398,6 +401,7 @@ export class MigrationService {
       clearInterval(interval);
       this.monitoringIntervals.delete(migrationId);
     }
+    this.statsHistory.delete(migrationId);
   }
 
   private async checkMigrationStatus(migrationId: string): Promise<void> {
@@ -699,6 +703,20 @@ export class MigrationService {
     });
   }
 
+  async acknowledgeAllAlerts(migrationId?: string): Promise<void> {
+    await this.prisma.alert.updateMany({
+      where: {
+        acknowledged: false,
+        ...(migrationId && { migrationId }),
+      },
+      data: { acknowledged: true },
+    });
+  }
+
+  async getUnreadAlertCount(): Promise<number> {
+    return this.prisma.alert.count({ where: { acknowledged: false } });
+  }
+
   // ==================== History / Deduplication ====================
 
   private async saveCompletedMigrationIds(migrationId: string): Promise<void> {
@@ -706,9 +724,9 @@ export class MigrationService {
       const migration = await this.prisma.migration.findUnique({ where: { id: migrationId } });
       if (!migration?.csvFileName) return;
 
-      const csvPath = require('path').join(process.cwd(), 'uploads', migration.csvFileName);
+      const csvPath = path.join(process.cwd(), 'uploads', migration.csvFileName);
       try {
-        await require('fs/promises').access(csvPath);
+        await fs.access(csvPath);
       } catch {
         return; // CSV ya no existe en disco
       }
