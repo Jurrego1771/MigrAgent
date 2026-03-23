@@ -172,14 +172,41 @@ export class CSVController {
     }
   }
 
+  // POST /api/csv/temp/:id/check-internal-duplicates — detecta IDs repetidos dentro del CSV
+  static async checkInternalDuplicates(req: Request, res: Response) {
+    const { id } = req.params as { id: string };
+    const { idColumn } = req.body as { idColumn: string };
+
+    if (!idColumn) return res.status(400).json({ error: 'idColumn es requerido' });
+
+    const filePath = path.join(TEMP_DIR, `${id}.csv`);
+    try {
+      await fs.access(filePath);
+    } catch {
+      return res.status(404).json({ error: 'Archivo temporal no encontrado.' });
+    }
+
+    const result = await csvValidator.getInternalDuplicates(filePath, idColumn);
+    res.json(result);
+  }
+
   // POST /api/csv/temp/:id/normalize — genera CSV normalizado con columnas extra y reglas de transformación
   static async normalizeTemp(req: Request, res: Response) {
     const { id } = req.params as { id: string };
-    const { extraColumns = [], transformationRules = [], skipDuplicateIds = [], idColumn } = req.body as {
+    const {
+      extraColumns = [],
+      transformationRules = [],
+      skipDuplicateIds = [],
+      idColumn,
+      deduplicateById = false,
+      removeEmptyInColumns = [],
+    } = req.body as {
       extraColumns?: { name: string; defaultValue: string }[];
       transformationRules?: TransformationRule[];
       skipDuplicateIds?: string[];
       idColumn?: string;
+      deduplicateById?: boolean;
+      removeEmptyInColumns?: string[];
     };
 
     const inputPath = path.join(TEMP_DIR, `${id}.csv`);
@@ -195,7 +222,8 @@ export class CSVController {
 
     const skipSet = new Set(skipDuplicateIds);
     const result = await csvValidator.normalizeCSV(
-      inputPath, outputPath, extraColumns, transformationRules, skipSet, idColumn
+      inputPath, outputPath, extraColumns, transformationRules, skipSet, idColumn,
+      { deduplicateById, removeEmptyInColumns }
     );
 
     res.json({

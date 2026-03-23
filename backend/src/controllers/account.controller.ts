@@ -2,12 +2,22 @@ import { Request, Response } from 'express';
 import { MediastreamService } from '../services/mediastream.service.js';
 import { AuthService } from '../services/auth.service.js';
 
-// Perfiles de calidad de video reconocidos, en orden descendente de calidad
+// Perfiles de calidad de video 16:9, en orden descendente de calidad
 const VIDEO_PROFILES_ORDERED = [
   '1080p', '1080p Low', '720p', '720p Low', '480p', '360p', '240p', '144p',
 ];
 
-// Perfiles de audio
+// Perfiles de calidad de video 9:16 (vertical), en orden descendente
+const VIDEO_PROFILES_9_16_ORDERED = [
+  '1920p', '1920p Low', '1280p', '1280p Low', '854p', '640p', '426p', '256p',
+];
+
+// Perfiles de audio, en orden descendente de calidad
+const AUDIO_PROFILES_ORDERED = [
+  '256kbps', '192kbps', '128kbps', '64kbps', '32kbps',
+];
+
+// Para detección de módulo AOD (compatibilidad con lógica existente)
 const AUDIO_PROFILES = ['aac', 'mp3', 'm4a'];
 
 export class AccountController {
@@ -100,15 +110,29 @@ export class AccountController {
 
     const activeProfilesSet = new Set(activeProfiles);
 
-    // Clasificar: qué perfiles de video estándar están activos y cuáles faltan
+    // Clasificar perfiles 16:9
     const activeVideoProfiles = VIDEO_PROFILES_ORDERED.filter((p) => activeProfilesSet.has(p));
     const missingVideoProfiles = VIDEO_PROFILES_ORDERED.filter((p) => !activeProfilesSet.has(p));
+
+    // Clasificar perfiles 9:16 (vertical)
+    const activeVideo9x16Profiles = VIDEO_PROFILES_9_16_ORDERED.filter((p) => activeProfilesSet.has(p));
+    const missingVideo9x16Profiles = VIDEO_PROFILES_9_16_ORDERED.filter((p) => !activeProfilesSet.has(p));
+
+    // Clasificar perfiles de audio
+    const activeAudioProfiles = AUDIO_PROFILES_ORDERED.filter((p) => activeProfilesSet.has(p));
+    const missingAudioProfiles = AUDIO_PROFILES_ORDERED.filter((p) => !activeProfilesSet.has(p));
 
     res.json({
       activeProfiles,
       activeVideoProfiles,
       missingVideoProfiles,
       allVideoProfiles: VIDEO_PROFILES_ORDERED,
+      activeVideo9x16Profiles,
+      missingVideo9x16Profiles,
+      allVideo9x16Profiles: VIDEO_PROFILES_9_16_ORDERED,
+      activeAudioProfiles,
+      missingAudioProfiles,
+      allAudioProfiles: AUDIO_PROFILES_ORDERED,
     });
   }
 

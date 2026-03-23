@@ -105,6 +105,7 @@ router.get('/csv/mapper-options', CSVController.getMapperOptions);
 // CSV temp (wizard)
 router.post('/csv/temp', upload.single('file'), CSVController.uploadTemp);
 router.post('/csv/temp/:id/normalize', CSVController.normalizeTemp);
+router.post('/csv/temp/:id/check-internal-duplicates', CSVController.checkInternalDuplicates);
 router.post('/csv/temp/:id/extract-urls', CSVController.extractUrlsFromTemp);
 router.post('/csv/temp/:id/validate-urls', CSVController.validateUrlsFromTemp);
 router.post('/csv/temp/:id/compare-report', upload.single('reportFile'), CSVController.compareWithReport);

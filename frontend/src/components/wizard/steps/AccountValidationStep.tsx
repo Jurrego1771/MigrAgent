@@ -26,7 +26,6 @@ import {
   Campaign as AdsIcon,
   AutoAwesome as SuggestIcon,
   Psychology as AIIcon,
-  FlashOn as AutoIcon,
 } from '@mui/icons-material';
 import { accountApi } from '../../../services/api';
 import { useWizard } from '../../../context/WizardContext';
@@ -491,8 +490,11 @@ const AI_FEATURE_LABELS: Record<string, { label: string; description: string }> 
 };
 
 function AISettingsSection({ aiSettings }: { aiSettings: Record<string, AIFeatureStatus> }) {
-  const enabledFeatures = Object.entries(aiSettings).filter(([, v]) => v.enabled);
-  const hasAny = enabledFeatures.length > 0;
+  // Solo mostramos features con generación automática activada
+  const autoFeatures = Object.entries(AI_FEATURE_LABELS).filter(
+    ([key]) => aiSettings[key]?.automatic === true
+  );
+  const hasAny = autoFeatures.length > 0;
 
   return (
     <SectionCard
@@ -511,49 +513,17 @@ function AISettingsSection({ aiSettings }: { aiSettings: Record<string, AIFeatur
               No se requiere ninguna acción adicional.
             </Alert>
 
-            {Object.entries(AI_FEATURE_LABELS).map(([key, meta]) => {
+            {autoFeatures.map(([key, meta]) => {
               const status = aiSettings[key];
-              if (!status) return null;
               return (
-                <Box
-                  key={key}
-                  sx={{
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: 1.5,
-                    opacity: status.enabled ? 1 : 0.45,
-                  }}
-                >
-                  {status.enabled ? (
-                    <CheckIcon sx={{ fontSize: 16, color: COLORS.sageGreen, flexShrink: 0, mt: 0.2 }} />
-                  ) : (
-                    <CancelIcon sx={{ fontSize: 16, color: 'text.disabled', flexShrink: 0, mt: 0.2 }} />
-                  )}
+                <Box key={key} sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5 }}>
+                  <CheckIcon sx={{ fontSize: 16, color: COLORS.sageGreen, flexShrink: 0, mt: 0.2 }} />
                   <Box sx={{ flexGrow: 1 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                      <Typography
-                        variant="body2"
-                        sx={{ fontWeight: 500, color: status.enabled ? 'text.primary' : 'text.disabled' }}
-                      >
+                      <Typography variant="body2" sx={{ fontWeight: 500 }}>
                         {meta.label}
                       </Typography>
-                      {status.enabled && status.automatic && (
-                        <Chip
-                          icon={<AutoIcon style={{ fontSize: 11 }} />}
-                          label="auto"
-                          size="small"
-                          sx={{
-                            height: 18,
-                            fontSize: '0.62rem',
-                            fontWeight: 700,
-                            bgcolor: alpha(COLORS.neonGreen, 0.12),
-                            color: COLORS.neonGreen,
-                            border: `1px solid ${alpha(COLORS.neonGreen, 0.35)}`,
-                            '& .MuiChip-icon': { color: COLORS.neonGreen },
-                          }}
-                        />
-                      )}
-                      {status.model && (
+                      {status?.model && (
                         <Chip
                           label={status.model}
                           size="small"
@@ -576,8 +546,7 @@ function AISettingsSection({ aiSettings }: { aiSettings: Record<string, AIFeatur
           </>
         ) : (
           <Typography variant="body2" color="text.disabled" sx={{ fontSize: '0.85rem' }}>
-            No se detectaron features de IA habilitadas en esta cuenta. El contenido migrado no tendrá
-            generación automática de metadata.
+            No se detectaron features de IA con generación automática en esta cuenta.
           </Typography>
         )}
       </Box>
@@ -589,6 +558,42 @@ function AISettingsSection({ aiSettings }: { aiSettings: Record<string, AIFeatur
 // Sub-componente de renditions
 // ---------------------------------------------------------------------------
 
+/** Chips de perfiles: verde = activo, gris = inactivo */
+function ProfileGrid({ active, missing }: { active: string[]; missing: string[] }) {
+  return (
+    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
+      {active.map((p) => (
+        <Chip
+          key={p}
+          label={p}
+          size="small"
+          icon={<CheckIcon style={{ fontSize: 12, color: COLORS.sageGreen }} />}
+          sx={{
+            bgcolor: alpha(COLORS.sageGreen, 0.13),
+            color: COLORS.sageGreen,
+            border: `1px solid ${alpha(COLORS.sageGreen, 0.4)}`,
+            fontWeight: 600,
+            fontSize: '0.72rem',
+          }}
+        />
+      ))}
+      {missing.map((p) => (
+        <Chip
+          key={p}
+          label={p}
+          size="small"
+          variant="outlined"
+          sx={{
+            borderColor: alpha(COLORS.charcoal, 0.5),
+            color: 'text.disabled',
+            fontSize: '0.72rem',
+          }}
+        />
+      ))}
+    </Box>
+  );
+}
+
 function RenditionsSection({
   renditionsInfo,
   contentType,
@@ -596,84 +601,68 @@ function RenditionsSection({
   renditionsInfo: RenditionsInfo;
   contentType: string | null;
 }) {
-  const apiUrl = 'https://platform.mediastre.am'; // se puede leer del context si se necesita
-  const { activeVideoProfiles, missingVideoProfiles } = renditionsInfo;
+  const apiUrl = 'https://platform.mediastre.am';
+  const {
+    activeVideoProfiles, missingVideoProfiles,
+    activeVideo9x16Profiles, missingVideo9x16Profiles,
+    activeAudioProfiles, missingAudioProfiles,
+  } = renditionsInfo;
 
-  // Para AOD solo mostramos aviso, no calidades de video
-  if (contentType === 'aod') {
-    return (
-      <SectionCard title="Calidades de audio" status="ok">
-        <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.85rem' }}>
-          Para AOD las calidades de audio se configuran automáticamente según los perfiles de la cuenta.
-        </Typography>
-      </SectionCard>
-    );
-  }
-
-  const hasEnoughProfiles = activeVideoProfiles.length >= 2;
+  const showVideo = contentType !== 'aod';
+  const showAudio = contentType !== 'vod';
+  const hasEnoughVideoProfiles = activeVideoProfiles.length >= 2;
 
   return (
     <SectionCard
-      title="Calidades de video (renditions)"
-      status={hasEnoughProfiles ? 'ok' : 'warn'}
+      title="Calidades configuradas en la cuenta"
+      status={showVideo && !hasEnoughVideoProfiles ? 'warn' : 'ok'}
     >
-      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {/* Activas */}
-        {activeVideoProfiles.length > 0 ? (
-          <Box>
-            <Typography variant="caption" color="text.disabled" sx={{ display: 'block', mb: 1 }}>
-              Perfiles activos en tu cuenta
-            </Typography>
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
-              {activeVideoProfiles.map((p) => (
-                <Chip
-                  key={p}
-                  label={p}
-                  size="small"
-                  sx={{
-                    bgcolor: alpha(COLORS.sageGreen, 0.15),
-                    color: COLORS.sageGreen,
-                    border: `1px solid ${alpha(COLORS.sageGreen, 0.4)}`,
-                    fontWeight: 600,
-                    fontSize: '0.75rem',
-                  }}
-                  icon={<CheckIcon style={{ fontSize: 13, color: COLORS.sageGreen }} />}
-                />
-              ))}
-            </Box>
-          </Box>
-        ) : (
-          <Alert severity="error" sx={{ fontSize: '0.8rem' }}>
-            No se encontraron perfiles de video configurados. El módulo de migración no funcionará correctamente.
-          </Alert>
-        )}
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
 
-        {/* Faltantes */}
-        {missingVideoProfiles.length > 0 && (
+        {/* ── Video 16:9 ── */}
+        {showVideo && (
           <Box>
-            <Typography variant="caption" color="text.disabled" sx={{ display: 'block', mb: 1 }}>
-              No configurados
+            <Typography variant="caption" sx={{ color: 'text.disabled', display: 'block', mb: 0.75, fontWeight: 600, letterSpacing: '0.06em' }}>
+              VIDEO 16:9
             </Typography>
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
-              {missingVideoProfiles.map((p) => (
-                <Chip
-                  key={p}
-                  label={p}
-                  size="small"
-                  variant="outlined"
-                  sx={{
-                    borderColor: alpha(COLORS.charcoal, 0.6),
-                    color: 'text.disabled',
-                    fontSize: '0.75rem',
-                  }}
-                />
-              ))}
-            </Box>
+            {activeVideoProfiles.length === 0 && missingVideoProfiles.length === 0 ? (
+              <Alert severity="error" sx={{ fontSize: '0.8rem' }}>
+                No se encontraron perfiles de video 16:9.
+              </Alert>
+            ) : (
+              <ProfileGrid active={activeVideoProfiles} missing={missingVideoProfiles} />
+            )}
           </Box>
         )}
 
-        {/* Advertencia y link a platform */}
-        {!hasEnoughProfiles && (
+        {/* ── Video 9:16 ── */}
+        {showVideo && (
+          <>
+            <Divider sx={{ opacity: 0.2 }} />
+            <Box>
+              <Typography variant="caption" sx={{ color: 'text.disabled', display: 'block', mb: 0.75, fontWeight: 600, letterSpacing: '0.06em' }}>
+                VIDEO 9:16 (VERTICAL)
+              </Typography>
+              <ProfileGrid active={activeVideo9x16Profiles} missing={missingVideo9x16Profiles} />
+            </Box>
+          </>
+        )}
+
+        {/* ── Audio ── */}
+        {showAudio && (
+          <>
+            <Divider sx={{ opacity: 0.2 }} />
+            <Box>
+              <Typography variant="caption" sx={{ color: 'text.disabled', display: 'block', mb: 0.75, fontWeight: 600, letterSpacing: '0.06em' }}>
+                AUDIO
+              </Typography>
+              <ProfileGrid active={activeAudioProfiles} missing={missingAudioProfiles} />
+            </Box>
+          </>
+        )}
+
+        {/* Advertencia video insuficiente */}
+        {showVideo && !hasEnoughVideoProfiles && (
           <Alert
             severity="warning"
             sx={{ fontSize: '0.8rem' }}
@@ -687,15 +676,11 @@ function RenditionsSection({
               </IconButton>
             }
           >
-            Se recomienda al menos 2 perfiles de calidad para una migración robusta.
+            Se recomienda al menos 2 perfiles de video activos para una migración robusta.
             Configúralos en <strong>Settings → Media</strong> de la plataforma.
           </Alert>
         )}
 
-        <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.7rem' }}>
-          Nota: en el siguiente paso, ffprobe verificará que las calidades de los archivos del CSV
-          sean compatibles con los perfiles activos.
-        </Typography>
       </Box>
     </SectionCard>
   );

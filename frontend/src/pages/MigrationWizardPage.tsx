@@ -82,12 +82,22 @@ function WizardLayout() {
           ? csvStep.historyDuplicates.ids
           : [];
 
+        // Campos críticos mapeados (para eliminar filas vacías si cleanCsv está activo)
+        const criticalMappedColumns = csvStep.cleanCsv
+          ? csvStep.mappings
+              .filter((m) => ['id', 'title', 'original', 'rendition'].includes(m.mapper))
+              .map((m) => m.field)
+          : [];
+
         const result = await csvApi.normalizeTemp(
           csvStep.tempFile.tempId,
           csvStep.extraColumns,
           csvStep.transformationRules,
           skipDuplicateIds,
-          idColumn
+          idColumn,
+          csvStep.cleanCsv
+            ? { deduplicateById: true, removeEmptyInColumns: criticalMappedColumns }
+            : undefined
         );
         setCsvStep({ normalizedTempId: result.normalizedTempId });
       } catch {

@@ -193,10 +193,35 @@ export class MigrationService {
 
     const mappings = JSON.parse(migration.mappings) as MappingConfig[];
 
+    // Construir el payload completo que SM2 necesita: keys + mappings + sample
+    const csvPath = path.join(process.cwd(), 'uploads', migration.csvFileName);
+    const [headers, rawSample] = await Promise.all([
+      this.csvValidator.getHeaders(csvPath),
+      this.csvValidator.getSampleRows(csvPath, 8),
+    ]);
+
+    // Sanitizar valores de fecha inválidos en el sample (SM2 rechaza fechas no parseables)
+    const DATE_MAPPERS = new Set(['date_created', 'date_recorded']);
+    const dateColumns = new Set(
+      mappings.filter((m) => DATE_MAPPERS.has(m.mapper)).map((m) => m.field)
+    );
+    const sample = rawSample.map((row) => {
+      const sanitized: Record<string, string> = { ...row };
+      for (const col of dateColumns) {
+        if (col in sanitized) {
+          const d = new Date(sanitized[col]);
+          if (isNaN(d.getTime())) sanitized[col] = '';
+        }
+      }
+      return sanitized;
+    });
+
     const msConfig = await (await this.ms()).createMigration({
       name: migration.name,
       strategy: migration.strategy as 'transcode' | 'upload',
-      mappings,
+      keys: headers,
+      mappings, // solo las columnas mapeadas por el usuario
+      sample,
     });
 
     await this.prisma.migration.update({

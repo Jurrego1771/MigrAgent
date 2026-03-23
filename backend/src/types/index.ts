@@ -148,22 +148,20 @@ export interface AlertData {
 }
 
 // Tipos para auto-detección de campos
+// Patrones de detección automática — solo mappers soportados por SM2
 export const MAPPER_PATTERNS: Record<string, RegExp[]> = {
-  id: [/^id$/i, /^video[_-]?id$/i, /^media[_-]?id$/i, /^content[_-]?id$/i, /^asset[_-]?id$/i, /^uid$/i, /^uuid$/i],
-  title: [/^title$/i, /^titulo$/i, /^name$/i, /^nombre$/i, /^video[_-]?title$/i],
-  original: [/^url$/i, /^video[_-]?url$/i, /^source[_-]?url$/i, /^original$/i, /^link$/i, /^src$/i],
-  description: [/^description$/i, /^desc$/i, /^descripcion$/i, /^summary$/i, /^sinopsis$/i],
-  category: [/^category$/i, /^categoria$/i, /^folder$/i, /^carpeta$/i],
-  tag: [/^tags?$/i, /^etiquetas?$/i, /^keywords?$/i, /^labels?$/i],
-  thumb: [/^thumb(nail)?$/i, /^poster$/i, /^image$/i, /^imagen$/i, /^cover$/i],
-  published: [/^publish(ed)?$/i, /^public(o)?$/i, /^visible$/i, /^active$/i],
+  id:           [/^id$/i, /^video[_-]?id$/i, /^media[_-]?id$/i, /^content[_-]?id$/i, /^asset[_-]?id$/i, /^uid$/i, /^uuid$/i],
+  title:        [/^title$/i, /^titulo$/i, /^name$/i, /^nombre$/i, /^video[_-]?title$/i],
+  original:     [/^url$/i, /^video[_-]?url$/i, /^source[_-]?url$/i, /^original$/i, /^link$/i, /^src$/i],
+  rendition:    [/^rendition$/i, /^mp4$/i, /^hls$/i, /^dash$/i],
+  description:  [/^description$/i, /^desc$/i, /^descripcion$/i, /^summary$/i, /^sinopsis$/i],
+  category:     [/^category$/i, /^categoria$/i, /^folder$/i, /^carpeta$/i],
+  tag:          [/^tags?$/i, /^etiquetas?$/i, /^keywords?$/i, /^labels?$/i],
+  thumb:        [/^thumb(nail)?$/i, /^poster$/i, /^image$/i, /^imagen$/i, /^cover$/i],
+  published:    [/^publish(ed)?$/i, /^public(o)?$/i, /^visible$/i, /^active$/i],
   date_created: [/^date[_-]?created$/i, /^created[_-]?(at|date)?$/i, /^fecha[_-]?creacion$/i],
-  date_recorded: [/^date[_-]?recorded$/i, /^recorded[_-]?(at|date)?$/i, /^fecha[_-]?grabacion$/i],
-  show: [/^show$/i, /^serie$/i, /^program(a)?$/i],
-  showSeason: [/^season$/i, /^temporada$/i],
-  showSeasonEpisode: [/^episode$/i, /^episodio$/i, /^chapter$/i, /^capitulo$/i],
-  geo: [/^geo$/i, /^country$/i, /^pais$/i, /^region$/i],
-  rendition: [/^rendition$/i, /^mp4$/i, /^hls$/i, /^dash$/i],
+  date_recorded:[/^date[_-]?recorded$/i, /^recorded[_-]?(at|date)?$/i, /^fecha[_-]?grabacion$/i],
+  show:         [/^show$/i, /^serie$/i, /^program(a)?$/i],
 };
 
 // Tipos para migración por lotes

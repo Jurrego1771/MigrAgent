@@ -247,11 +247,22 @@ export const csvApi = {
     extraColumns: { name: string; defaultValue: string }[],
     transformationRules: TransformationRule[] = [],
     skipDuplicateIds: string[] = [],
-    idColumn?: string
+    idColumn?: string,
+    cleanOptions?: { deduplicateById?: boolean; removeEmptyInColumns?: string[] }
   ): Promise<{ normalizedTempId: string; rowCount: number; addedColumns: string[]; skippedCount: number }> => {
     const { data } = await api.post(`/csv/temp/${tempId}/normalize`, {
       extraColumns, transformationRules, skipDuplicateIds, idColumn,
+      deduplicateById: cleanOptions?.deduplicateById ?? false,
+      removeEmptyInColumns: cleanOptions?.removeEmptyInColumns ?? [],
     });
+    return data;
+  },
+
+  checkInternalDuplicates: async (
+    tempId: string,
+    idColumn: string
+  ): Promise<{ count: number; ids: string[]; hasMore: boolean }> => {
+    const { data } = await api.post(`/csv/temp/${tempId}/check-internal-duplicates`, { idColumn });
     return data;
   },
 

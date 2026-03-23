@@ -22,6 +22,8 @@ import {
   History as HistoryIcon,
   FilterAlt as FilterIcon,
   Bookmark as TemplateIcon,
+  CleaningServices as CleanIcon,
+  Error as ErrorIcon,
 } from '@mui/icons-material';
 import { useDropzone } from 'react-dropzone';
 import { csvApi, settingsApi, templateApi } from '../../../services/api';
@@ -35,24 +37,20 @@ import TransformationRulesEditor from './TransformationRulesEditor';
 // Constantes
 // ---------------------------------------------------------------------------
 
+// Mappers soportados por SM2 (alineados con Settings → Migration de la plataforma)
 const ALL_MAPPERS = [
-  { name: 'id',               label: 'ID Único',              required: true  },
-  { name: 'title',            label: 'Título',                required: true  },
-  { name: 'original',         label: 'URL Origen (transcode)',required: false, strategy: 'transcode' },
-  { name: 'rendition',        label: 'Rendición (upload)',    required: false, strategy: 'upload'    },
-  { name: 'description',      label: 'Descripción',           required: false },
-  { name: 'category',         label: 'Categoría',             required: false },
-  { name: 'category_id',      label: 'ID Categoría',          required: false },
-  { name: 'tag',              label: 'Tags',                  required: false },
-  { name: 'thumb',            label: 'Thumbnail',             required: false },
-  { name: 'published',        label: 'Publicado',             required: false },
-  { name: 'date_created',     label: 'Fecha Creación',        required: false },
-  { name: 'date_recorded',    label: 'Fecha Grabación',       required: false },
-  { name: 'geo',              label: 'Geo Restricción',       required: false },
-  { name: 'show',             label: 'Show/Serie',            required: false },
-  { name: 'showSeason',       label: 'Temporada',             required: false },
-  { name: 'showSeasonEpisode',label: 'Episodio',              required: false },
-  { name: 'custom',           label: 'Atributo Custom',       required: false },
+  { name: 'id',           label: 'ID Único (CMS)',         required: true  },
+  { name: 'title',        label: 'Título',                 required: true  },
+  { name: 'original',     label: 'Media Origin URL',       required: false, strategy: 'transcode' },
+  { name: 'rendition',    label: 'Rendición (upload)',     required: false, strategy: 'upload'    },
+  { name: 'description',  label: 'Media Description',      required: false },
+  { name: 'category',     label: 'Category',               required: false },
+  { name: 'tag',          label: 'Media Tags',             required: false },
+  { name: 'thumb',        label: 'Media Thumbnail',        required: false },
+  { name: 'published',    label: 'Media Published Status', required: false },
+  { name: 'date_created', label: 'Date Created',           required: false },
+  { name: 'date_recorded',label: 'Date Recorded',          required: false },
+  { name: 'show',         label: 'Show',                   required: false },
 ];
 
 // ---------------------------------------------------------------------------
@@ -230,9 +228,9 @@ function MappingRow({ header, mapping, confidence, sampleValues, strategy, usedM
 export default function CSVMappingStep() {
   const {
     csvStep, setMappings, setExtraColumns, setCsvStep,
-    setTransformationRules, setSkipHistoryDuplicates, accountValidation, session,
+    setTransformationRules, setSkipHistoryDuplicates, setCleanCsv, accountValidation, session,
   } = useWizard();
-  const { tempFile, mappings, extraColumns, transformationRules, historyDuplicates, skipHistoryDuplicates } = csvStep;
+  const { tempFile, mappings, extraColumns, transformationRules, historyDuplicates, skipHistoryDuplicates, internalDuplicates, cleanCsv } = csvStep;
   const { migrationStrategy, suggestCategoryField } = accountValidation;
 
   const [uploading, setUploading] = useState(false);
@@ -247,8 +245,9 @@ export default function CSVMappingStep() {
   const [detectedTemplate, setDetectedTemplate] = useState<Template | null>(null);
   const [templateDismissed, setTemplateDismissed] = useState(false);
 
-  // Chequeo automático de historial
+  // Chequeo automático de historial e internos
   const [checkingHistory, setCheckingHistory] = useState(false);
+  const [checkingInternalDups, setCheckingInternalDups] = useState(false);
 
   // Herramienta de comparación de reportes
   const [compareOpen, setCompareOpen] = useState(false);
@@ -277,14 +276,15 @@ export default function CSVMappingStep() {
       .catch(() => {}); // silencioso — no bloquear flujo principal
   }, []); // eslint-disable-line
 
-  // Auto-chequear historial cuando se asigna la columna id
+  // Auto-chequear historial e internos cuando se asigna la columna id
   const idMapping = mappings.find((m) => m.mapper === 'id');
   useEffect(() => {
     if (!tempFile?.tempId || !idMapping?.field) {
-      setCsvStep({ historyDuplicates: null });
+      setCsvStep({ historyDuplicates: null, internalDuplicates: null });
       return;
     }
     let cancelled = false;
+
     setCheckingHistory(true);
     csvApi.checkHistory(tempFile.tempId, idMapping.field)
       .then((result) => {
@@ -297,6 +297,16 @@ export default function CSVMappingStep() {
       })
       .catch(() => {})
       .finally(() => { if (!cancelled) setCheckingHistory(false); });
+
+    setCheckingInternalDups(true);
+    csvApi.checkInternalDuplicates(tempFile.tempId, idMapping.field)
+      .then((result) => {
+        if (cancelled) return;
+        setCsvStep({ internalDuplicates: result.count > 0 ? result : null });
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setCheckingInternalDups(false); });
+
     return () => { cancelled = true; };
   }, [tempFile?.tempId, idMapping?.field]); // eslint-disable-line
 
@@ -530,6 +540,162 @@ export default function CSVMappingStep() {
           </Tooltip>
         </Box>
       )}
+
+      {/* ── Diagnóstico del CSV ── */}
+      {tempFile && (() => {
+        const emptyEntries = Object.entries(tempFile.emptyFields ?? {}).filter(([, count]) => count > 0);
+        const criticalEmpty = emptyEntries.filter(([col]) =>
+          mappings.some((m) => m.field === col && ['id', 'title', 'original', 'rendition'].includes(m.mapper))
+        );
+        const optionalEmpty = emptyEntries.filter(([col]) =>
+          !mappings.some((m) => m.field === col && ['id', 'title', 'original', 'rendition'].includes(m.mapper))
+        );
+        const hasDiagnosis = criticalEmpty.length > 0 || optionalEmpty.length > 0 || internalDuplicates;
+        if (!hasDiagnosis && !checkingInternalDups) return null;
+
+        const issueCount =
+          (criticalEmpty.length > 0 ? 1 : 0) +
+          (optionalEmpty.length > 0 ? 1 : 0) +
+          (internalDuplicates ? 1 : 0);
+
+        return (
+          <Box
+            sx={{
+              border: `1px solid ${alpha(criticalEmpty.length > 0 ? COLORS.alertRed : '#F5A623', 0.4)}`,
+              borderRadius: 2,
+              overflow: 'hidden',
+            }}
+          >
+            {/* Header del diagnóstico */}
+            <Box
+              sx={{
+                px: 2, py: 1.25,
+                background: alpha(criticalEmpty.length > 0 ? COLORS.alertRed : '#F5A623', 0.08),
+                display: 'flex', alignItems: 'center', gap: 1,
+              }}
+            >
+              {criticalEmpty.length > 0
+                ? <ErrorIcon sx={{ fontSize: 18, color: COLORS.alertRed, flexShrink: 0 }} />
+                : <WarnIcon sx={{ fontSize: 18, color: '#F5A623', flexShrink: 0 }} />
+              }
+              <Typography variant="caption" fontWeight={700} sx={{ color: criticalEmpty.length > 0 ? COLORS.alertRed : '#F5A623', flexGrow: 1, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                Diagnóstico del CSV — {issueCount} problema{issueCount !== 1 ? 's' : ''} detectado{issueCount !== 1 ? 's' : ''}
+              </Typography>
+              {hasDiagnosis && (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
+                  <CleanIcon sx={{ fontSize: 15, color: cleanCsv ? COLORS.sageGreen : 'text.disabled' }} />
+                  <Typography variant="caption" color={cleanCsv ? COLORS.sageGreen : 'text.disabled'}>
+                    Limpiar CSV
+                  </Typography>
+                  <Switch
+                    size="small"
+                    checked={cleanCsv}
+                    onChange={(e) => setCleanCsv(e.target.checked)}
+                    sx={{
+                      '& .MuiSwitch-thumb': { bgcolor: cleanCsv ? COLORS.sageGreen : undefined },
+                      '& .MuiSwitch-track': { bgcolor: cleanCsv ? alpha(COLORS.sageGreen, 0.5) : undefined },
+                    }}
+                  />
+                </Box>
+              )}
+            </Box>
+
+            {/* Cuerpo del diagnóstico */}
+            <Box sx={{ px: 2, py: 1.5, display: 'flex', flexDirection: 'column', gap: 1.25 }}>
+              {/* Campos críticos vacíos */}
+              {criticalEmpty.length > 0 && (
+                <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
+                  <ErrorIcon sx={{ fontSize: 15, color: COLORS.alertRed, mt: 0.2, flexShrink: 0 }} />
+                  <Box>
+                    <Typography variant="caption" fontWeight={600} sx={{ color: COLORS.alertRed }}>
+                      Campos críticos con valores vacíos
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
+                      {criticalEmpty.map(([col, count]) => (
+                        <Chip
+                          key={col}
+                          label={`${col} · ${count} vacío${count !== 1 ? 's' : ''}`}
+                          size="small"
+                          sx={{ fontSize: '0.68rem', bgcolor: alpha(COLORS.alertRed, 0.12), color: COLORS.alertRed, border: `1px solid ${alpha(COLORS.alertRed, 0.3)}` }}
+                        />
+                      ))}
+                    </Box>
+                    {cleanCsv && (
+                      <Typography variant="caption" sx={{ color: COLORS.sageGreen, display: 'block', mt: 0.5 }}>
+                        Se eliminarán las filas afectadas al normalizar
+                      </Typography>
+                    )}
+                  </Box>
+                </Box>
+              )}
+
+              {/* Campos opcionales vacíos */}
+              {optionalEmpty.length > 0 && (
+                <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
+                  <WarnIcon sx={{ fontSize: 15, color: '#F5A623', mt: 0.2, flexShrink: 0 }} />
+                  <Box>
+                    <Typography variant="caption" fontWeight={600} sx={{ color: '#F5A623' }}>
+                      Campos opcionales con valores vacíos
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
+                      {optionalEmpty.map(([col, count]) => (
+                        <Chip
+                          key={col}
+                          label={`${col} · ${count} vacío${count !== 1 ? 's' : ''}`}
+                          size="small"
+                          sx={{ fontSize: '0.68rem', bgcolor: alpha('#F5A623', 0.1), color: '#F5A623', border: `1px solid ${alpha('#F5A623', 0.3)}` }}
+                        />
+                      ))}
+                    </Box>
+                  </Box>
+                </Box>
+              )}
+
+              {/* Duplicados internos */}
+              {(checkingInternalDups || internalDuplicates) && (
+                <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
+                  {checkingInternalDups
+                    ? <CircularProgress size={13} sx={{ color: 'text.disabled', mt: 0.2, flexShrink: 0 }} />
+                    : <WarnIcon sx={{ fontSize: 15, color: '#F5A623', mt: 0.2, flexShrink: 0 }} />
+                  }
+                  <Box>
+                    {checkingInternalDups ? (
+                      <Typography variant="caption" color="text.disabled">Buscando IDs duplicados…</Typography>
+                    ) : internalDuplicates && (
+                      <>
+                        <Typography variant="caption" fontWeight={600} sx={{ color: '#F5A623' }}>
+                          {internalDuplicates.count} ID{internalDuplicates.count !== 1 ? 's' : ''} repetido{internalDuplicates.count !== 1 ? 's' : ''} dentro del CSV
+                        </Typography>
+                        {cleanCsv && (
+                          <Typography variant="caption" sx={{ color: COLORS.sageGreen, display: 'block', mt: 0.25 }}>
+                            Se conservará solo la primera ocurrencia de cada ID
+                          </Typography>
+                        )}
+                      </>
+                    )}
+                  </Box>
+                </Box>
+              )}
+
+              {/* Resumen limpieza */}
+              {cleanCsv && (criticalEmpty.length > 0 || internalDuplicates) && (
+                <Box
+                  sx={{
+                    mt: 0.5, pt: 1,
+                    borderTop: `1px solid ${alpha(COLORS.sageGreen, 0.2)}`,
+                    display: 'flex', alignItems: 'center', gap: 1,
+                  }}
+                >
+                  <CleanIcon sx={{ fontSize: 14, color: COLORS.sageGreen }} />
+                  <Typography variant="caption" sx={{ color: COLORS.sageGreen }}>
+                    El CSV se limpiará automáticamente al avanzar al paso siguiente
+                  </Typography>
+                </Box>
+              )}
+            </Box>
+          </Box>
+        );
+      })()}
 
       {/* Tabla de mapeo */}
       {tempFile && (

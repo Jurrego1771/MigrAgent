@@ -64,6 +64,12 @@ export interface RenditionsInfo {
   activeVideoProfiles: string[];
   missingVideoProfiles: string[];
   allVideoProfiles: string[];
+  activeVideo9x16Profiles: string[];
+  missingVideo9x16Profiles: string[];
+  allVideo9x16Profiles: string[];
+  activeAudioProfiles: string[];
+  missingAudioProfiles: string[];
+  allAudioProfiles: string[];
 }
 
 // ==================== CSV Wizard ====================
@@ -95,6 +101,9 @@ export interface CSVWizardState {
   // Deduplicación por historial
   historyDuplicates: { count: number; ids: string[] } | null;
   skipHistoryDuplicates: boolean;
+  // Diagnóstico interno del CSV
+  internalDuplicates: { count: number; ids: string[] } | null;
+  cleanCsv: boolean; // eliminar filas vacías críticas + deduplicar internamente
 }
 
 // ==================== URL Validation Wizard (Step 4) ====================

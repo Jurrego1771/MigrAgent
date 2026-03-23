@@ -52,6 +52,8 @@ const DEFAULT_CSV_STATE: CSVWizardState = {
   templateId: null,
   historyDuplicates: null,
   skipHistoryDuplicates: false,
+  internalDuplicates: null,
+  cleanCsv: false,
 };
 
 const DEFAULT_URL_VALIDATION: URLValidationWizardState = {
@@ -84,6 +86,7 @@ interface WizardContextValue extends WizardState {
   setExtraColumns: (cols: ExtraColumn[]) => void;
   setTransformationRules: (rules: TransformationRule[]) => void;
   setSkipHistoryDuplicates: (skip: boolean) => void;
+  setCleanCsv: (clean: boolean) => void;
   setUrlValidation: (update: Partial<URLValidationWizardState>) => void;
   canGoNext: boolean;
   isStepComplete: (step: number) => boolean;
@@ -128,6 +131,10 @@ export function WizardProvider({ children }: { children: ReactNode }) {
 
   const setSkipHistoryDuplicates = useCallback((skip: boolean) => {
     setCsvStepState((prev) => ({ ...prev, skipHistoryDuplicates: skip }));
+  }, []);
+
+  const setCleanCsv = useCallback((clean: boolean) => {
+    setCsvStepState((prev) => ({ ...prev, cleanCsv: clean }));
   }, []);
 
   const setUrlValidation = useCallback((update: Partial<URLValidationWizardState>) => {
@@ -218,6 +225,7 @@ export function WizardProvider({ children }: { children: ReactNode }) {
         setExtraColumns,
         setTransformationRules,
         setSkipHistoryDuplicates,
+        setCleanCsv,
         setUrlValidation,
         canGoNext,
         isStepComplete,

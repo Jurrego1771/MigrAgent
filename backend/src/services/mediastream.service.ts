@@ -123,7 +123,7 @@ export class MediastreamService {
     strategy: 'transcode' | 'upload';
     keys: string[];
     mappings: MappingConfig[];
-    sample?: Record<string, string>[];
+    sample: Record<string, string>[];
   }): Promise<MediastreamMigrationConfig> {
     // SM2 expects application/x-www-form-urlencoded with PHP-style nested arrays.
     // Field name in mappings is "mapping" (not "mapper"), and sample rows must be included.
@@ -158,24 +158,62 @@ export class MediastreamService {
     const formData = params.toString();
     const formHeaders = { 'Content-Type': 'application/x-www-form-urlencoded' };
 
-    // Step 1: validate (non-blocking — SM2 UI does this before saving)
-    await this.client.post('/api/settings/migration/validate', formData, {
-      headers: formHeaders,
-    }).catch(() => {}); // validation errors are non-fatal; proceed to save
+    const throwSM2Error = (err: any, prefix: string) => {
+      const sm2Errors: string[] = err?.response?.data?.data;
+      if (Array.isArray(sm2Errors) && sm2Errors.length > 0) {
+        const friendly = new Error(`${prefix}: ${sm2Errors.join(' | ')}`);
+        (friendly as any).code = 'SM2_VALIDATION_ERROR';
+        (friendly as any).sm2Errors = sm2Errors;
+        throw friendly;
+      }
+      throw err;
+    };
 
-    // Step 2: save the migration
-    const response = await this.client.post('/api/settings/migration', formData, {
-      headers: formHeaders,
-    });
-    return response.data;
+    // Step 1: validate
+    try {
+      await this.client.post('/api/settings/migration/validate', formData, { headers: formHeaders });
+    } catch (err: any) {
+      const sm2Errors: string[] = err?.response?.data?.data;
+      if (Array.isArray(sm2Errors) && sm2Errors.length > 0) {
+        throwSM2Error(err, 'SM2 rechazó la configuración');
+      }
+      // Errores no relacionados con validación: no bloqueamos
+    }
+
+    // Step 2: crear migración → devuelve { _id, ... }
+    let created: MediastreamMigrationConfig;
+    try {
+      const response = await this.client.post('/api/settings/migration', formData, { headers: formHeaders });
+      created = response.data?.data ?? response.data;
+    } catch (err: any) {
+      throwSM2Error(err, 'SM2 rechazó la migración');
+    }
+
+    // Step 3: guardar/finalizar con POST /:id (mismo body)
+    try {
+      const response = await this.client.post(`/api/settings/migration/${created!._id}`, formData, { headers: formHeaders });
+      return response.data?.data ?? response.data;
+    } catch (err: any) {
+      // Si el tercer paso falla pero ya tenemos el _id, devolvemos lo creado
+      console.warn('SM2 step 3 (POST /:id) failed, returning created config:', err?.response?.data);
+      return created!;
+    }
   }
 
   async updateMigration(
     migrationId: string,
     data: Partial<MediastreamMigrationConfig>
   ): Promise<MediastreamMigrationConfig> {
-    const response = await this.client.put(`/api/settings/migration/${migrationId}`, data);
-    return response.data;
+    const params = new URLSearchParams();
+    for (const [k, v] of Object.entries(data)) {
+      if (v !== undefined && v !== null) params.append(k, String(v));
+    }
+    const response = await this.client.post(
+      `/api/settings/migration/${migrationId}`,
+      params.toString(),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+    );
+    return response.data?.data ?? response.data;
   }
 
   async deleteMigration(migrationId: string): Promise<void> {
@@ -183,24 +221,24 @@ export class MediastreamService {
   }
 
   async validateMigration(migrationId: string): Promise<{ valid: boolean; errors?: string[] }> {
-    const response = await this.client.put(`/api/settings/migration/${migrationId}/validate`);
+    const response = await this.client.post(`/api/settings/migration/${migrationId}/validate`);
     return response.data;
   }
 
   // ==================== Migration Control ====================
 
   async startMigration(migrationId: string): Promise<MediastreamMigrationConfig> {
-    const response = await this.client.put(`/api/settings/migration/${migrationId}/start`);
+    const response = await this.client.post(`/api/settings/migration/${migrationId}/start`);
     return response.data;
   }
 
   async stopMigration(migrationId: string): Promise<MediastreamMigrationConfig> {
-    const response = await this.client.put(`/api/settings/migration/${migrationId}/stop`);
+    const response = await this.client.post(`/api/settings/migration/${migrationId}/stop`);
     return response.data;
   }
 
   async retryMigration(migrationId: string): Promise<MediastreamMigrationConfig> {
-    const response = await this.client.put(`/api/settings/migration/${migrationId}/retry`);
+    const response = await this.client.post(`/api/settings/migration/${migrationId}/retry`);
     return response.data;
   }
 

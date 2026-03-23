@@ -46,3 +46,7 @@ uploads/
 
 # Claude Code local config
 .claude/
+
+# Claude Code runtime files
+.agents/
+skills-lock.json

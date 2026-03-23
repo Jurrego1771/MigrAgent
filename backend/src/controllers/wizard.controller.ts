@@ -13,6 +13,19 @@ const templateService = new TemplateService(prisma);
 const TEMP_DIR = path.join(process.cwd(), 'uploads', 'temp');
 const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
 
+// Mappers que SM2 valida como fecha — valores inválidos en sample causan rechazo
+const DATE_MAPPERS = new Set(['date_created', 'date_recorded']);
+
+/**
+ * Devuelve true si la cadena puede parsearse como fecha válida por SM2.
+ * SM2 acepta formatos ISO 8601 y timestamp unix. Rechaza texto arbitrario.
+ */
+function isValidDateValue(val: string): boolean {
+  if (!val.trim()) return false;
+  const d = new Date(val);
+  return !isNaN(d.getTime());
+}
+
 /**
  * Builds the complete keys + mappings + sample payload for SM2.
  *
@@ -24,35 +37,38 @@ const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
  * Unmapped columns use the operator workaround: map to "published" with an
  * impossible condition (publishedMatch = random token that will never match a
  * real value) so SM2 treats those items as not-published without rejecting them.
+ *
+ * Sample rows are sanitized: date fields with invalid values are replaced with
+ * empty string so SM2 doesn't reject the migration during sample validation.
  */
 async function buildSM2MigrationPayload(
   csvPath: string,
   userMappings: MappingConfig[]
 ): Promise<{ keys: string[]; mappings: MappingConfig[]; sample: Record<string, string>[] }> {
-  const [headers, sample] = await Promise.all([
+  const [headers, rawSample] = await Promise.all([
     csvValidator.getHeaders(csvPath),
     csvValidator.getSampleRows(csvPath, 8),
   ]);
 
-  const mappedFields = new Set(userMappings.map((m) => m.field));
-  const fullMappings: MappingConfig[] = [...userMappings];
+  // Columnas mapeadas a campos de fecha
+  const dateColumns = new Set(
+    userMappings.filter((m) => DATE_MAPPERS.has(m.mapper)).map((m) => m.field)
+  );
 
-  for (const header of headers) {
-    if (!mappedFields.has(header)) {
-      // Operator workaround: map to "published" with a condition that never
-      // matches so SM2 accepts the column without changing publish status.
-      fullMappings.push({
-        mapper: 'published',
-        field: header,
-        options: [
-          { key: 'publishedStatus', val: false },
-          { key: 'publishedMatch', val: `NO_MATCH_${Date.now()}` },
-        ] as unknown as Record<string, unknown>,
-      });
+  // Sanitizar valores de fecha inválidos en el sample
+  const sample = rawSample.map((row) => {
+    const sanitized: Record<string, string> = { ...row };
+    for (const col of dateColumns) {
+      if (col in sanitized && !isValidDateValue(sanitized[col])) {
+        sanitized[col] = '';
+      }
     }
-  }
+    return sanitized;
+  });
 
-  return { keys: headers, mappings: fullMappings, sample };
+  // SM2 solo necesita las columnas que el usuario mapeó explícitamente.
+  // Las columnas sin mapear se envían en keys[] pero no en mappings[] — SM2 las ignora.
+  return { keys: headers, mappings: userMappings, sample };
 }
 
 export class WizardController {
@@ -148,7 +164,20 @@ export class WizardController {
     });
 
     const sm2Payload = await buildSM2MigrationPayload(csvPath, mappings);
-    const msConfig = await ms.createMigration({ name, strategy, ...sm2Payload });
+    let msConfig: Awaited<ReturnType<typeof ms.createMigration>>;
+    try {
+      msConfig = await ms.createMigration({ name, strategy, ...sm2Payload });
+    } catch (err: any) {
+      // Limpiar la migración local si SM2 la rechazó
+      await prisma.migration.delete({ where: { id: migration.id } }).catch(() => {});
+      if (err.code === 'SM2_VALIDATION_ERROR') {
+        return res.status(422).json({
+          error: err.message,
+          sm2Errors: err.sm2Errors,
+        });
+      }
+      throw err;
+    }
 
     await prisma.migration.update({
       where: { id: migration.id },

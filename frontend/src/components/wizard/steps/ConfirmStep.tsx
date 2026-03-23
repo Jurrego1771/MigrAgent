@@ -100,12 +100,18 @@ export default function ConfirmStep() {
       setStatus('success');
       markStepComplete(currentStep);
     } catch (err: unknown) {
-      const msg =
-        err instanceof Error
-          ? err.message
-          : typeof err === 'object' && err !== null && 'response' in err
-          ? (err as { response?: { data?: { error?: string } } }).response?.data?.error ?? 'Error desconocido'
-          : 'Error desconocido';
+      const axiosData = (err as any)?.response?.data;
+      let msg: string;
+      if (axiosData?.sm2Errors && Array.isArray(axiosData.sm2Errors) && axiosData.sm2Errors.length > 0) {
+        // Errores de validación de SM2 — mostrar cada mensaje
+        msg = axiosData.sm2Errors.join('\n');
+      } else if (axiosData?.error) {
+        msg = axiosData.error;
+      } else if (err instanceof Error) {
+        msg = err.message;
+      } else {
+        msg = 'Error desconocido';
+      }
       setErrorMsg(msg);
       setStatus('error');
     }
@@ -353,7 +359,7 @@ export default function ConfirmStep() {
             <Typography variant="body2" fontWeight={600} sx={{ color: COLORS.alertRed }}>
               Error al crear la migración
             </Typography>
-            <Typography variant="caption" color="text.secondary">
+            <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'pre-line' }}>
               {errorMsg}
             </Typography>
           </Box>

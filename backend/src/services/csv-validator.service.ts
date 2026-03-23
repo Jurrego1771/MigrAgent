@@ -455,13 +455,48 @@ export class CSVValidatorService {
    * - Agrega columnas extra con valores por defecto
    * - Escribe el resultado en outputPath
    */
+  /**
+   * Detecta IDs duplicados dentro del propio CSV (sin comparar con historial).
+   * Retorna los IDs que aparecen más de una vez.
+   */
+  async getInternalDuplicates(
+    filePath: string,
+    idColumn: string
+  ): Promise<{ count: number; ids: string[]; hasMore: boolean }> {
+    const idCounts = new Map<string, number>();
+
+    await new Promise<void>((resolve, reject) => {
+      const parser = createReadStream(filePath).pipe(
+        parse({ columns: true, skip_empty_lines: true, trim: true, relax_column_count: true })
+      );
+      parser.on('data', (row: Record<string, string>) => {
+        const id = row[idColumn]?.trim();
+        if (id) idCounts.set(id, (idCounts.get(id) ?? 0) + 1);
+      });
+      parser.on('error', reject);
+      parser.on('end', resolve);
+    });
+
+    const duplicateIds = [...idCounts.entries()]
+      .filter(([, count]) => count > 1)
+      .map(([id]) => id);
+
+    const MAX = 100;
+    return {
+      count: duplicateIds.length,
+      ids: duplicateIds.slice(0, MAX),
+      hasMore: duplicateIds.length > MAX,
+    };
+  }
+
   async normalizeCSV(
     inputPath: string,
     outputPath: string,
     extraColumns: { name: string; defaultValue: string }[] = [],
     transformationRules: TransformationRule[] = [],
     skipIds: Set<string> = new Set(),
-    idColumn?: string
+    idColumn?: string,
+    options?: { deduplicateById?: boolean; removeEmptyInColumns?: string[] }
   ): Promise<{ rowCount: number; addedColumns: string[]; skippedCount: number }> {
     const rows: Record<string, string>[] = [];
 
@@ -479,14 +514,34 @@ export class CSVValidatorService {
     const addedColumns = extraColumns.map((c) => c.name);
     const headers = [...Object.keys(rows[0]), ...addedColumns];
 
+    const deduplicateById = options?.deduplicateById ?? false;
+    const removeEmptyInColumns = options?.removeEmptyInColumns ?? [];
+    const seenIds = new Set<string>();
+
     let skippedCount = 0;
     const normalizedRows = rows.flatMap((row) => {
-      // Filtrar IDs ya migrados si se solicitó
+      // Filtrar IDs ya migrados (historial)
       if (skipIds.size > 0 && idColumn) {
         const rowId = row[idColumn]?.trim();
         if (rowId && skipIds.has(rowId)) {
           skippedCount++;
           return [];
+        }
+      }
+
+      // Deduplicar internamente (conservar primera ocurrencia)
+      if (deduplicateById && idColumn) {
+        const rowId = row[idColumn]?.trim();
+        if (rowId) {
+          if (seenIds.has(rowId)) { skippedCount++; return []; }
+          seenIds.add(rowId);
+        }
+      }
+
+      // Eliminar filas con campos críticos vacíos
+      if (removeEmptyInColumns.length > 0) {
+        for (const col of removeEmptyInColumns) {
+          if (!row[col]?.trim()) { skippedCount++; return []; }
         }
       }
 
