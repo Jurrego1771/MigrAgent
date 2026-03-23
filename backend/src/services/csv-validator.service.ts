@@ -19,6 +19,23 @@ import { TransformationEngine } from './transformation-engine.service.js';
 import { URLValidatorService } from './url-validator.service.js';
 import { config } from '../config/index.js';
 
+// Términos canónicos normalizados (lowercase, sin separadores) para fuzzy matching.
+// Derivados de MAPPER_PATTERNS — se actualizan en paralelo con esa constante.
+const MAPPER_CANONICAL_TERMS: Record<string, string[]> = {
+  id:           ['id', 'videoid', 'mediaid', 'contentid', 'assetid', 'uid', 'uuid'],
+  title:        ['title', 'titulo', 'name', 'nombre', 'videotitle'],
+  original:     ['url', 'videourl', 'sourceurl', 'original', 'link', 'src'],
+  rendition:    ['rendition', 'mp4', 'hls', 'dash'],
+  description:  ['description', 'desc', 'descripcion', 'summary', 'sinopsis'],
+  category:     ['category', 'categoria', 'folder', 'carpeta'],
+  tag:          ['tag', 'tags', 'etiqueta', 'etiquetas', 'keywords', 'keyword', 'labels', 'label'],
+  thumb:        ['thumb', 'thumbnail', 'poster', 'image', 'imagen', 'cover'],
+  published:    ['published', 'publico', 'visible', 'active'],
+  date_created: ['datecreated', 'createdat', 'fechacreacion'],
+  date_recorded:['daterecorded', 'recordedat', 'fechagrabacion'],
+  show:         ['show', 'serie', 'programa'],
+};
+
 export class CSVValidatorService {
   private urlValidator: URLValidatorService;
   private transformEngine: TransformationEngine;
@@ -243,11 +260,61 @@ export class CSVValidatorService {
     return detectedMappings;
   }
 
+  /** Distancia de edición (Levenshtein) entre dos strings. */
+  private levenshtein(a: string, b: string): number {
+    const m = a.length, n = b.length;
+    // Fila anterior y fila actual — O(n) memoria en vez de O(m*n)
+    let prev = Array.from({ length: n + 1 }, (_, j) => j);
+    for (let i = 1; i <= m; i++) {
+      const curr = [i, ...Array(n).fill(0)];
+      for (let j = 1; j <= n; j++) {
+        curr[j] = a[i - 1] === b[j - 1]
+          ? prev[j - 1]
+          : 1 + Math.min(prev[j], curr[j - 1], prev[j - 1]);
+      }
+      prev = curr;
+    }
+    return prev[n];
+  }
+
+  /**
+   * Fuzzy matching: normaliza el nombre del campo (lowercase + quita separadores)
+   * y lo compara contra los términos canónicos de cada mapper.
+   * Solo se activa si el nombre normalizado tiene >= 4 caracteres
+   * (los campos cortos los cubre la regex exacta de MAPPER_PATTERNS).
+   * Retorna el mejor mapper si la similitud supera el umbral mínimo de 0.72.
+   */
+  private fuzzyMatchMapper(field: string): { mapper: string; confidence: number } | null {
+    const normalized = field.toLowerCase().replace(/[\s_\-.]+/g, '');
+    if (normalized.length < 4) return null;
+
+    let bestMapper: string | null = null;
+    let bestSimilarity = 0;
+
+    for (const [mapper, terms] of Object.entries(MAPPER_CANONICAL_TERMS)) {
+      for (const term of terms) {
+        const maxLen = Math.max(normalized.length, term.length);
+        const distance = this.levenshtein(normalized, term);
+        const similarity = 1 - distance / maxLen;
+        if (similarity > bestSimilarity) {
+          bestSimilarity = similarity;
+          bestMapper = mapper;
+        }
+      }
+    }
+
+    if (!bestMapper || bestSimilarity < 0.72) return null;
+
+    // Escala de confianza: 0.72–0.84 → 0.65, ≥ 0.85 → 0.75
+    const confidence = bestSimilarity >= 0.85 ? 0.75 : 0.65;
+    return { mapper: bestMapper, confidence };
+  }
+
   private detectMapperForField(
     field: string,
     sampleRows: Record<string, string>[]
   ): { mapper: string; confidence: number } | null {
-    // Primero intentar por nombre del campo
+    // 1. Coincidencia exacta por regex (confianza 0.90)
     for (const [mapper, patterns] of Object.entries(MAPPER_PATTERNS)) {
       for (const pattern of patterns) {
         if (pattern.test(field)) {
@@ -256,7 +323,11 @@ export class CSVValidatorService {
       }
     }
 
-    // Intentar por contenido de las muestras
+    // 2. Fuzzy matching por distancia de edición (confianza 0.65–0.75)
+    const fuzzy = this.fuzzyMatchMapper(field);
+    if (fuzzy) return fuzzy;
+
+    // 3. Inferencia por contenido de las muestras
     const samples = sampleRows.map((r) => r[field] || '').filter((v) => v.trim() !== '');
 
     if (samples.length === 0) return null;
