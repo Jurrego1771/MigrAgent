@@ -13,6 +13,48 @@ const templateService = new TemplateService(prisma);
 const TEMP_DIR = path.join(process.cwd(), 'uploads', 'temp');
 const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
 
+/**
+ * Builds the complete keys + mappings + sample payload for SM2.
+ *
+ * SM2 requires:
+ *   - keys[]     : every CSV column header
+ *   - mappings[] : one entry per column (using field "mapping" not "mapper")
+ *   - sample[]   : a few sample rows so SM2 can preview the data
+ *
+ * Unmapped columns use the operator workaround: map to "published" with an
+ * impossible condition (publishedMatch = random token that will never match a
+ * real value) so SM2 treats those items as not-published without rejecting them.
+ */
+async function buildSM2MigrationPayload(
+  csvPath: string,
+  userMappings: MappingConfig[]
+): Promise<{ keys: string[]; mappings: MappingConfig[]; sample: Record<string, string>[] }> {
+  const [headers, sample] = await Promise.all([
+    csvValidator.getHeaders(csvPath),
+    csvValidator.getSampleRows(csvPath, 8),
+  ]);
+
+  const mappedFields = new Set(userMappings.map((m) => m.field));
+  const fullMappings: MappingConfig[] = [...userMappings];
+
+  for (const header of headers) {
+    if (!mappedFields.has(header)) {
+      // Operator workaround: map to "published" with a condition that never
+      // matches so SM2 accepts the column without changing publish status.
+      fullMappings.push({
+        mapper: 'published',
+        field: header,
+        options: [
+          { key: 'publishedStatus', val: false },
+          { key: 'publishedMatch', val: `NO_MATCH_${Date.now()}` },
+        ] as unknown as Record<string, unknown>,
+      });
+    }
+  }
+
+  return { keys: headers, mappings: fullMappings, sample };
+}
+
 export class WizardController {
   // POST /api/wizard/create
   static async createMigration(req: Request, res: Response) {
@@ -105,7 +147,8 @@ export class WizardController {
       },
     });
 
-    const msConfig = await ms.createMigration({ name, strategy, mappings });
+    const sm2Payload = await buildSM2MigrationPayload(csvPath, mappings);
+    const msConfig = await ms.createMigration({ name, strategy, ...sm2Payload });
 
     await prisma.migration.update({
       where: { id: migration.id },
@@ -150,6 +193,9 @@ export class WizardController {
     const prefix = batchConfig.namePrefix || name;
     const batchGroupId = uuidv4();
 
+    // Pre-build the SM2 payload (same keys/mappings for all batches)
+    const batchSM2Payload = await buildSM2MigrationPayload(csvPath, mappings);
+
     // 1. Dividir el CSV
     const { paths: batchPaths, rowCounts } = await csvValidator.splitCSV(
       csvPath,
@@ -187,7 +233,7 @@ export class WizardController {
       });
 
       // Crear en SM2
-      const msConfig = await ms.createMigration({ name: batchName, strategy, mappings });
+      const msConfig = await ms.createMigration({ name: batchName, strategy, ...batchSM2Payload });
 
       await prisma.migration.update({
         where: { id: migration.id },

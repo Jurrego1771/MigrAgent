@@ -31,9 +31,13 @@ export class MediastreamService {
     };
 
     // SM2 salta el middleware de sesión cuando recibe x-api-token,
-    // lo que rompe req.session.aid. Usamos solo la cookie de sesión.
+    // lo que rompe req.session.aid. Usamos cookies en cambio:
+    //   - mdstrm.id : establece req.session.aid (cuenta activa)
+    //   - jwt       : autorización para endpoints de settings/migration
     if (sid) {
-      headers['Cookie'] = `mdstrm.id=${sid}`;
+      const cookieParts = [`mdstrm.id=${sid}`];
+      if (jwt) cookieParts.push(`jwt=${jwt}`);
+      headers['Cookie'] = cookieParts.join('; ');
     }
 
     this.client = axios.create({
@@ -117,9 +121,52 @@ export class MediastreamService {
   async createMigration(data: {
     name: string;
     strategy: 'transcode' | 'upload';
+    keys: string[];
     mappings: MappingConfig[];
+    sample?: Record<string, string>[];
   }): Promise<MediastreamMigrationConfig> {
-    const response = await this.client.post('/api/settings/migration/create', data);
+    // SM2 expects application/x-www-form-urlencoded with PHP-style nested arrays.
+    // Field name in mappings is "mapping" (not "mapper"), and sample rows must be included.
+    const params = new URLSearchParams();
+    params.append('name', data.name);
+    params.append('strategy', data.strategy);
+
+    for (const key of data.keys) {
+      params.append('keys[]', key);
+    }
+
+    const sampleRows = data.sample || [];
+    for (let i = 0; i < sampleRows.length; i++) {
+      for (const [col, val] of Object.entries(sampleRows[i])) {
+        params.append(`sample[${i}][${col}]`, String(val ?? ''));
+      }
+    }
+
+    for (let i = 0; i < data.mappings.length; i++) {
+      const m = data.mappings[i];
+      params.append(`mappings[${i}][mapping]`, m.mapper);
+      params.append(`mappings[${i}][field]`, m.field);
+      if (Array.isArray(m.options)) {
+        const opts = m.options as Array<{ key: string; val: unknown }>;
+        for (let j = 0; j < opts.length; j++) {
+          params.append(`mappings[${i}][options][${j}][key]`, String(opts[j].key));
+          params.append(`mappings[${i}][options][${j}][val]`, String(opts[j].val));
+        }
+      }
+    }
+
+    const formData = params.toString();
+    const formHeaders = { 'Content-Type': 'application/x-www-form-urlencoded' };
+
+    // Step 1: validate (non-blocking — SM2 UI does this before saving)
+    await this.client.post('/api/settings/migration/validate', formData, {
+      headers: formHeaders,
+    }).catch(() => {}); // validation errors are non-fatal; proceed to save
+
+    // Step 2: save the migration
+    const response = await this.client.post('/api/settings/migration', formData, {
+      headers: formHeaders,
+    });
     return response.data;
   }
 

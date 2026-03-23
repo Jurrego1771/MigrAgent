@@ -420,6 +420,18 @@ export class CSVValidatorService {
     return output;
   }
 
+  getSampleRows(filePath: string, count = 8): Promise<Record<string, string>[]> {
+    return new Promise((resolve, reject) => {
+      const rows: Record<string, string>[] = [];
+      const parser = createReadStream(filePath).pipe(
+        parse({ columns: true, to: count + 1, skip_empty_lines: true })
+      );
+      parser.on('data', (row: Record<string, string>) => rows.push(row));
+      parser.on('end', () => resolve(rows.slice(0, count)));
+      parser.on('error', reject);
+    });
+  }
+
   getHeaders(filePath: string): Promise<string[]> {
     return new Promise((resolve, reject) => {
       const parser = createReadStream(filePath).pipe(

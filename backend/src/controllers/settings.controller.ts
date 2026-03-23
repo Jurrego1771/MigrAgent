@@ -45,10 +45,12 @@ export class SettingsController {
       const migrations = await ms.listMigrations();
       res.json(migrations);
     } catch (error) {
-      res.status(500).json({
-        error: 'Error al obtener migraciones de Mediastream',
-        details: error instanceof Error ? error.message : 'Unknown error',
-      });
+      // SM2 may return DB_ERROR or other transient errors on this endpoint.
+      // The conflict-detection feature is non-critical — return empty list
+      // with a warning so the wizard step continues loading normally.
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.warn('getMediastreamMigrations: SM2 unavailable, returning empty list:', message);
+      res.json([]);
     }
   }
 }

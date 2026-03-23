@@ -448,13 +448,13 @@ export default function URLValidationStep() {
               icon={<CancelIcon />}
               label="Fallidas"
               value={summary.failed}
-              color={summary.failed > 0 ? COLORS.alertRed : 'text.disabled' as string}
+              color={summary.failed > 0 ? COLORS.alertRed : '#666666'}
             />
             <StatCard
               icon={<WarningIcon />}
               label="Rate limit"
               value={summary.withRateLimit}
-              color={summary.withRateLimit > 0 ? '#F5A623' : 'text.disabled' as string}
+              color={summary.withRateLimit > 0 ? '#F5A623' : '#666666'}
             />
             <StatCard
               icon={<PublicIcon />}
